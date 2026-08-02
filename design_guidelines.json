@@ -1,0 +1,105 @@
+{
+  "project_name": "SentinelFlow",
+  "theme": "dark",
+  "emotional_archetype": "The Performance Pro / Tactical Minimalism",
+  "typography": {
+    "headings": {
+      "font": "IBM Plex Sans",
+      "classes": "font-sans tracking-tight font-semibold"
+    },
+    "body": {
+      "font": "IBM Plex Sans",
+      "classes": "font-sans text-sm md:text-base leading-relaxed"
+    },
+    "code_and_logs": {
+      "font": "JetBrains Mono",
+      "classes": "font-mono text-xs tracking-wider"
+    },
+    "instructions": "Use IBM Plex Sans for clean structural UI text. Use JetBrains Mono extensively for raw JSON logs, IP addresses, and timestamps to enforce the cybersecurity analyst tool context. Ensure tight letter spacing on large stats."
+  },
+  "colors": {
+    "background": {
+      "hex": "#0A0B0E",
+      "hsl": "225 17% 5%",
+      "description": "Deep obsidian blue/black for max contrast"
+    },
+    "surface": {
+      "hex": "#111318",
+      "hsl": "225 17% 8%",
+      "description": "Slightly lighter than background for cards and panels"
+    },
+    "border": {
+      "hex": "#1F232B",
+      "hsl": "225 16% 14%",
+      "description": "Subtle structured grid lines"
+    },
+    "accents": {
+      "critical": "#EF4444",
+      "warning": "#F59E0B",
+      "info": "#06B6D4",
+      "success": "#10B981",
+      "brand": "#4F46E5"
+    },
+    "instructions": "Dark mode default. Rely heavily on high-contrast accent colors for alert severity. No gradients for functional data; use 1px solid borders and subtle colored text instead."
+  },
+  "layouts": {
+    "strategy": "The Bento Grid Protocol - Mode B (High Density)",
+    "spacing": "Tight functional spacing. p-4 or p-6 inside cards. gap-4 between widgets.",
+    "dashboard_grid": "grid-cols-1 md:grid-cols-4 lg:grid-cols-12 gap-4. 3-col span for stat cards, 8-col span for timeseries, 4-col span for donut charts.",
+    "log_explorer": "Dense data table taking full width. Row heights tight (h-10 or h-12) to fit max data. Use a side drawer (w-1/3 or w-1/2) sliding in from the right to show raw JSON when a row is clicked."
+  },
+  "components": {
+    "cards": "Flat solid surfaces. border border-border/50. max rounded-md. NO glassmorphism to avoid visual refraction of crucial data.",
+    "badges_chips": "Used for severities. Critical (bg-red-500/10 text-red-500 border-red-500/20), Suspicious (bg-amber-500/10 text-amber-500 border-amber-500/20).",
+    "buttons": "Sharp corners or rounded-sm. Hover state must brighten. Primary buttons use brand color.",
+    "tables": "Dense. Sticky headers. Hover states on rows (bg-white/5). Cell text must be vertically centered.",
+    "json_viewer": "Inside the side drawer, raw log JSON must be wrapped in a pre/code block with syntax highlighting colors (keys in cyan, strings in amber, numbers in purple)."
+  },
+  "motion": {
+    "micro_interactions": "Hover states on all interactive elements (translate-y-[1px], slight bg brightness).",
+    "drawer": "Smooth slide-in from right for log details (transform 0.3s ease-out).",
+    "alerts": "New alerts in the feed should pulse gently (animate-pulse once) upon entering."
+  },
+  "visual_enhancers": {
+    "glows": "Critical alerts can have a very subtle drop-shadow glow (drop-shadow-[0_0_8px_rgba(239,68,68,0.2)]).",
+    "icons": "Use Phosphor Icons (Duotone or Regular) or Lucide Icons for dense developer tool feel. Setup command: `yarn add lucide-react` (if not present) or `@phosphor-icons/react`.",
+    "charts": "Recharts. Transparent background. Stroke colors map to severity levels. Neon-like line charts with 2px stroke width."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.unsplash.com/photo-1644088379091-d574269d422f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGRhdGElMjBub2RlcyUyMGRhcmt8ZW58MHx8fHwxNzg1NjkxNDUzfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Abstract blue data nodes, perfect for subtle login screen background overlay.",
+      "category": "backgrounds"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1506863530036-1efeddceb993?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwzfHxhbmFseXN0JTIwcG9ydHJhaXR8ZW58MHx8fHwxNzg1NjkxNDUzfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Analyst portrait 1",
+      "category": "avatars"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1560250097-0b93528c311a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwyfHxhbmFseXN0JTIwcG9ydHJhaXR8ZW58MHx8fHwxNzg1NjkxNDUzfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Analyst portrait 2",
+      "category": "avatars"
+    }
+  ],
+  "accessibility": {
+    "contrast": "Text over background must strictly meet WCAG AA. Tint neutral grays slightly with blue for legibility.",
+    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute."
+  },
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Do not make generic centered layouts. Use optical alignment. DO NOT apply global transitions like 'transition: all'.",
+    "Never use generic AI emojis.",
+    "Every interaction needs micro-animations. Static = dead.",
+    "Use Phosphor or Lucide icons for professional tech aesthetic.",
+    "Prioritize existing components in src/components/ui.",
+    "Use Recharts for the Dashboard event volume time-series, source IPs bar chart, and alerts by severity donut.",
+    "For the Log Explorer Drawer, do not use a standard Modal. Use a sliding Right Drawer (Shadcn Sheet component).",
+    "All interactive elements must have `data-testid` attributes.",
+    "DO NOT use a transparent background on dropdowns or overlays.",
+    "All frontend files MUST be strictly .js or .jsx, NO .tsx files.",
+    "Utilize sonner for toasts notifications.",
+    "Do not apply global transitions (e.g. `transition: all`). Target specific properties like `transition: transform 0.2s ease`."
+  ]
+}
