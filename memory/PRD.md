@@ -103,6 +103,20 @@ Build the MVP of SentinelFlow, an explainable SIEM (Security Information & Event
 - **Alert lifecycle + detection rules untouched** (verified in tests).
 - **Testing**: 17/17 iteration-5 pytest + frontend E2E green after adding the initially-missed `new-incident-btn` and `incident-status-filter` render (test agent flagged, patched).
 
+## Iteration 6 — 2026-02-02
+- **Reports**:
+  - `GET /api/reports/summary?start=&end=` returns totals + counts by severity + incidents-by-status for the range.
+  - `GET /api/reports/alerts.csv`, `/api/reports/incidents.csv`, `/api/reports/combined.pdf` — CSV + reportlab PDF with tables per severity (Likely malicious → Suspicious → Informational).
+  - PDF is XSS-safe: user-controlled strings (explanation, root_cause, title) run through `_esc()` before entering reportlab `Paragraph`.
+  - Every export writes to `audit_logs` with `action=report_export`.
+  - Frontend `/reports` page: date-range picker, live preview counts (with severity chips), one-click CSV/PDF download tiles.
+- **Slack / Teams webhooks (per user)**:
+  - `notification_prefs` stored on `users` doc: `webhook_url`, `webhook_type` (auto-detected — Slack vs Teams based on URL), `webhook_enabled`, `webhook_min_severity`.
+  - Endpoints: `GET/PUT /api/me/notifications`, `POST /api/me/notifications/test` (with configured URL, 8s httpx timeout).
+  - `webhooks.py`: `slack_payload` (`{text, attachments}`) and `teams_payload` (`MessageCard`); `dispatch_alert_to_users` runs after ingest and dedups per user via the same `alert_notifications` collection with `wh:{rule_id}:{fp}:{hour}:{email}` keys — separate keyspace from email.
+  - Frontend `/notifications` page: enable switch, URL input with auto-detected type hint, min-severity dropdown, Save + Send test buttons.
+- Email pipeline and every prior iteration remain untouched. Testing: 26/26 iteration-6 backend pytest + frontend E2E all green on first pass (no fixes required).
+
 ## Prioritized backlog (deferred for follow-up prompts, per problem statement)
 ### P1
 - Event correlation across multiple rules → incidents (group related alerts under one incident id)
