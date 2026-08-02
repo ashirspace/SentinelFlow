@@ -38,6 +38,24 @@ Build the MVP of SentinelFlow, an explainable SIEM (Security Information & Event
 - Toast notifications via sonner
 - 25/25 backend pytest passed; frontend E2E flows all green
 
+## Iteration 2 — 2026-02-02
+- **Syslog ingestion**: RFC-5424 + RFC-3164 (BSD) parser in `syslog_parser.py`.
+  - File upload with `.log`/`.syslog` extension auto-routes to the syslog parser.
+  - New endpoint `POST /api/ingest/syslog` accepts `{source_name, text}` for paste/curl.
+  - New "Paste syslog" tab on the Ingest page (uses shadcn Tabs).
+- **3 new detection rules** (RULES_META now = 9):
+  - `R007` Excessive API requests: ≥120 web requests from same `src_ip` inside 1 min → Suspicious.
+  - `R008` Injection patterns in URL: SQLi / XSS / directory-traversal regex matches → Likely malicious.
+  - `R009` New-device admin login: successful admin login from an unseen `(src_ip, user_agent)` fingerprint → Suspicious. Backed by `known_devices` collection with unique index.
+- **Email notifications** (`notifier.py`):
+  - Standard-library SMTP with STARTTLS. Env-driven (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS`, `ALERT_EMAIL_TO`).
+  - Dedup via new `alert_notifications` MongoDB collection keyed `{rule_id}:{fingerprint}:{hour}` with TTL (`ALERT_EMAIL_DEDUP_HOURS`).
+  - Severity floor via `ALERT_EMAIL_MIN_SEVERITY` (default `Suspicious`).
+  - `GET /api/notifier/status` returns config + enable state. Dashboard shows `Email · on/off` pill.
+  - Safe when unconfigured: pipeline runs, send is skipped, no exceptions.
+- **Normalize schema**: added `user_agent` canonical field with aliases (`user-agent`, `ua`, `useragent`).
+- **Testing**: 33/33 backend pytest passed; frontend E2E for the 3 new features (notifier-pill, 9 rule cards, syslog paste) green.
+
 ## Prioritized backlog (deferred for follow-up prompts, per problem statement)
 ### P1
 - Event correlation across multiple rules → incidents (group related alerts under one incident id)
