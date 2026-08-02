@@ -200,7 +200,7 @@ async def delete_user(user_id: str, admin: dict = Depends(require_admin)):
 @api.get("/sources")
 async def list_sources(_: dict = Depends(current_user)):
     from datetime import timedelta
-    sources = await db.log_sources.find({}, {"_id": 0, "ingest_api_key": 0}).to_list(1000)
+    sources = await db.log_sources.find({}, {"_id": 0, "ingest_api_key_hash": 0}).to_list(1000)
     now = datetime.now(timezone.utc)
     for s in sources:
         s.setdefault("paused", False)

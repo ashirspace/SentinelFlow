@@ -75,6 +75,23 @@ Build the MVP of SentinelFlow, an explainable SIEM (Security Information & Event
 - **New frontend pages**: **Log Sources** (health, retention dialog, rotate-key dialog), **Incidents** (list + drawer with linked alerts + evidence). Alerts drawer now has a Response Actions panel with an "Approve" button per allowed action + Approvals history. Log Explorer has Export CSV + annotations panel.
 - **Testing**: 60/60 backend pytest passed (27 new + 33 regression); frontend E2E all green after fixing an initial `exportCsv` undef in Explorer.jsx.
 
+## Iteration 4 — 2026-02-02
+- **Push-only live ingestion path**: new `POST /api/v1/ingest` endpoint authenticated ONLY by a scoped, write-only API key (`sfk_...` prefix). Per-request:
+  - `Authorization: Bearer sfk_...` or `X-Ingest-Key` header.
+  - Rate limit: **60 req/min per key** (in-memory sliding window in `ingest_v1.py`).
+  - Max **1000 events/req** and **1 MB body**.
+  - Reuses the existing `_ingest_events` pipeline → normalization, R001–R010 detection, notifier.
+  - Returns `{ingested, alerts, source, rate_limit: {remaining, reset_seconds, limit_per_min}}`.
+- **Keys are hashed at rest** — only sha256 hash stored (`ingest_api_key_hash`) plus a 12-char hint. Plaintext returned exactly once at create/rotate. `GET /api/sources` never returns the hash.
+- **Admin ops**: `POST /api/sources` (create + reveal), `POST /api/sources/{name}/rotate-key`, new `POST /api/sources/{name}/revoke-key` (unset hash, ingest disabled until next rotate). Every op writes to audit_logs.
+- **Cross-endpoint isolation**: an ingest key on any other endpoint (`GET /api/events`, `/api/sources`, etc.) is rejected with 401 — it is only valid for `POST /api/v1/ingest`.
+- **`GET /api/ingest/config`**: returns endpoint URL and quotas so the UI can render live snippets.
+- **Frontend**:
+  - Sources page: **Add source** button opens a create dialog; on submit a one-time **Connect** dialog reveals the API key with copyable **curl**, **Fluent Bit**, **Vector**, and **Node** snippets pre-filled with the endpoint + key.
+  - Per-row **Revoke** button next to Rotate.
+  - Push-only endpoint info card at the top of the Sources page.
+- **Testing**: 18/18 iteration-4 pytest + full frontend E2E green after fixing (a) sha256 hash leak in `GET /api/sources`, (b) `copy-endpoint` data-testid on the reveal dialog.
+
 ## Prioritized backlog (deferred for follow-up prompts, per problem statement)
 ### P1
 - Event correlation across multiple rules → incidents (group related alerts under one incident id)

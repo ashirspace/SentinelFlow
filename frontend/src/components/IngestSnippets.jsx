@@ -92,13 +92,13 @@ async function shipToSentinelFlow(event) {
         <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
           Ingest endpoint
         </div>
-        <CopyRow label="Endpoint" value={ingestEndpoint} copied={copied} onCopy={copy} data-testid="copy-endpoint" />
+        <CopyRow label="Endpoint" value={ingestEndpoint} copied={copied} onCopy={copy} testid="copy-endpoint" />
       </div>
       <div>
         <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
           API key ({sourceName})
         </div>
-        <CopyRow label="API key" value={apiKey} copied={copied} onCopy={copy} testid="copy-api-key" mask={false} />
+        <CopyRow label="API key" value={apiKey} copied={copied} onCopy={copy} testid="copy-api-key" />
       </div>
 
       <Tabs defaultValue="curl" className="w-full">
