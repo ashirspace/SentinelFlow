@@ -92,6 +92,17 @@ Build the MVP of SentinelFlow, an explainable SIEM (Security Information & Event
   - Push-only endpoint info card at the top of the Sources page.
 - **Testing**: 18/18 iteration-4 pytest + full frontend E2E green after fixing (a) sha256 hash leak in `GET /api/sources`, (b) `copy-endpoint` data-testid on the reveal dialog.
 
+## Iteration 5 — 2026-02-02
+- **Manual incident creation**: `POST /api/incidents` accepts title/severity/summary + `alert_ids[]`; aggregates evidence, starts a timeline.
+- **Timeline**: every incident change (status, root_cause, note, title, alerts_added, alerts_removed) appends a typed entry `{at, kind, by, text, meta}`. Backfilled `[]` on legacy incidents in responses.
+- **Root cause** field on incidents; PATCH persists + records a `root_cause` timeline entry.
+- **Lifecycle now Open → Investigating → Resolved → Closed** (Resolved is new; validated in the Pydantic pattern).
+- **Link / unlink alerts**: `POST /api/incidents/{id}/alerts` and `DELETE /api/incidents/{id}/alerts/{alert_id}`. Recomputes evidence on unlink. `GET /api/alerts/{id}` now returns `linked_incidents`.
+- **Saved searches** (Log Explorer): `saved_searches` collection with unique `(owner, name)` index. `GET/POST/DELETE /api/saved-searches`. Per-user visibility.
+- **Frontend**: Incidents page adds a **New incident** button + status filter, and the drawer now has a lifecycle updater with Resolved, a root-cause editor, an animated timeline (icons per kind, reverse-chronological), per-alert unlink buttons. Alerts drawer adds a **Link to existing incident** picker + a `linked_incidents` chip. Log Explorer adds a **Save search** dialog and a saved-searches chip strip (click to apply, × to delete).
+- **Alert lifecycle + detection rules untouched** (verified in tests).
+- **Testing**: 17/17 iteration-5 pytest + frontend E2E green after adding the initially-missed `new-incident-btn` and `incident-status-filter` render (test agent flagged, patched).
+
 ## Prioritized backlog (deferred for follow-up prompts, per problem statement)
 ### P1
 - Event correlation across multiple rules → incidents (group related alerts under one incident id)

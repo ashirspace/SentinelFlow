@@ -111,7 +111,28 @@ export default function Incidents() {
     <div className="pb-16">
       <PageHeader
         title="Incidents"
-        subtitle="Escalated alerts grouped for investigation. Every incident carries its originating alerts and evidence events."
+        subtitle="Group related alerts into an investigation. Timeline, evidence, and root cause live here."
+        right={
+          <div className="flex items-center gap-3">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px] font-mono text-xs" data-testid="incident-status-filter">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent className="bg-popover border border-border">
+                <SelectItem value="all">All statuses</SelectItem>
+                {STATUSES.map((s) => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={() => setNewOpen(true)}
+              data-testid="new-incident-btn"
+              className="font-mono text-xs uppercase tracking-widest"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              New incident
+            </Button>
+          </div>
+        }
       />
 
       <div className="px-8 space-y-2">
