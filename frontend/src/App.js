@@ -11,6 +11,8 @@ import Ingest from "@/pages/Ingest";
 import Rules from "@/pages/Rules";
 import Sources from "@/pages/Sources";
 import Incidents from "@/pages/Incidents";
+import Reports from "@/pages/Reports";
+import Notifications from "@/pages/Notifications";
 import Users from "@/pages/Users";
 import Audit from "@/pages/Audit";
 
@@ -36,6 +38,8 @@ export default function App() {
           <Route path="/rules" element={<Shell><Rules /></Shell>} />
           <Route path="/sources" element={<Shell><Sources /></Shell>} />
           <Route path="/incidents" element={<Shell><Incidents /></Shell>} />
+          <Route path="/reports" element={<Shell><Reports /></Shell>} />
+          <Route path="/notifications" element={<Shell><Notifications /></Shell>} />
           <Route path="/users" element={<Shell requireAdmin><Users /></Shell>} />
           <Route path="/audit" element={<Shell requireAdmin><Audit /></Shell>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 6 backend + frontend fully verified. Backend: 26/26 pytest pass (test_iteration6.py) — reports.summary (default/wide/empty ranges), alerts.csv (correct header + severity grouping Likely malicious → Suspicious → Informational), incidents.csv (all required cols), combined.pdf (magic %PDF bytes, >2KB, contains 'SentinelFlow', builds cleanly even when explanations contain HTML/<script> from R008), report_export audit rows written for all 3 targets. Per-user webhook prefs: defaults returned for fresh user, auto-detection slack vs teams by URL, 400 when enabled+empty URL, 400 for non-http(s) URLs, /me/notifications/test returns 400 with no URL and {result:'error:*'} on unreachable URL (not 500), prefs are isolated per user (admin vs analyst), update_notification_prefs audit row written. webhook payload construction: slack_payload has 'text', teams_payload has '@type=MessageCard'. Dispatcher: after enabling analyst webhook + reseeding, alert_notifications collection has channel='webhook' dedup docs (wh:* markers). Regression: 10 rules unchanged, alerts/incidents/v1/ping/notifier-status endpoints healthy. Frontend: nav-reports + nav-notifications visible in sidebar. Reports page renders all data-testids (report-start, report-end, report-refresh, reports-summary, download-alerts-csv, download-incidents-csv, download-combined-pdf) and each download tile calls window.open with the expected /api/reports/*.csv|pdf URL carrying start+end query params. Refresh preview populates summary (68 alerts, 6 incidents, by-severity + by-status blocks). Notifications page renders notifications-form + wh-enabled/wh-url/wh-min-severity/wh-save/wh-test; typing a hooks.slack.com URL flips 'Detected type' to slack, typing an outlook.office.com URL flips to teams; Save preferences shows 'Preferences saved' toast.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration6.py",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "reports.py alerts_csv/incidents_csv correctly group by SEVERITY_ORDER — verified header row and grouping in test_alerts_csv.",
+    "reports.py combined_pdf uses _esc() to XML-escape user-controlled fields (explanation, title, root_cause) before wrapping in Paragraph — this is what prevents reportlab paraparser errors when explanation contains '<script>' from R008 XSS alerts. Confirmed still passes with real seeded data.",
+    "webhooks.dispatch_alert_to_users uses insert_one({_id: 'wh:...'}) as dedup marker — second identical alert in same hour triggers DuplicateKeyError (caught) and correctly returns 'skipped:dedup'. Separate keyspace from email dedup ('em:*') — no collision.",
+    "server.py /me/notifications validates url must start with http(s):// AND requires url when webhook_enabled=true. Good. But: PUT accepts webhook_type from the client without validation — a client could send webhook_type='bogus' and it would be persisted (only if url empty; when url present, the code overrides only when webhook_type is falsy). Not exploitable but consider Field(pattern='^(slack|teams)?$').",
+    "reports.parse_range: when start is omitted, defaults to today 00:00 UTC of end_dt — sensible. When end is omitted, defaults to now. Both parse ISO with Z suffix. OK.",
+    "server.py test_my_webhook does NOT dedup or rate-limit — user can spam their own webhook. Not a bug but consider a small per-user cooldown.",
+    "webhooks.send_webhook uses 8s httpx timeout — good; won't hang the request loop. On timeout returns 'error:ReadTimeout' etc.",
+    "reports.collect_alerts / collect_incidents filter by ISO string comparison on created_at/opened_at — because all alerts store UTC ISO with timezone this works, but it is fragile: any doc with a naive timestamp would compare incorrectly. Not observed in seeded data."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration6.py",
+    "/app/test_reports/pytest/iter6_results.xml",
+    "/app/test_reports/iteration_6.json"
+  ],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "100% (Reports + Notifications pages fully wired)"},
+  "test_credentials": "Admin: admin@sentinelflow.io / Admin@12345; Analyst: analyst@sentinelflow.io / Analyst@123",
+  "seed_data_creation": "Ran /api/ingest/seed once to guarantee alerts/incidents in range. Mutated analyst.notification_prefs (slack/teams URLs) during testing then reset webhook_url to '' and webhook_enabled=false at end. Admin prefs were briefly modified in test_prefs_are_per_user and reset via curl to empty at end. Residual: alert_notifications collection contains 'wh:*' dedup rows from the dispatch test — these auto-expire via TTL index in ~1 hour.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration6.py is idempotent (resets analyst prefs at start of each notification test). Uses dotenv to load REACT_APP_BACKEND_URL + MONGO_URL. TestWebhookDispatch uses motor directly to count wh:* markers. If admin's notification_prefs are ever left non-empty by a previous run, the seeded ingest may enqueue an unwanted webhook — but the httpx timeout is 8s so tests won't hang. All 26 tests are green as of this run."
+}

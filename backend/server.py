@@ -24,6 +24,8 @@ from rules import run_all_rules, detect_silent_sources, detect_new_device_admin,
 from seed import sample_events, demo_sources
 from notifier import notify_alerts, is_enabled as email_enabled
 from responses import approve_action, RECOMMENDED_BY_RULE, ACTION_LABELS
+import reports as _reports
+import webhooks as _webhooks
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -369,6 +371,12 @@ async def _ingest_events(records: list, source_name: str, actor_email: str):
             logger.info("notify_alerts: %s", {s: statuses.count(s) for s in set(statuses)})
         except Exception as e:
             logger.warning("Notifier failed: %s", e)
+        try:
+            wh = await _webhooks.dispatch_alerts(db, alerts)
+            if wh:
+                logger.info("webhooks dispatched: %s", len(wh))
+        except Exception as e:
+            logger.warning("Webhook dispatcher failed: %s", e)
     await audit(actor_email, "ingest", target=source_name,
                 meta={"count": len(normalized), "alerts": len(alerts)})
     return {"ingested": len(normalized), "alerts": len(alerts)}
@@ -940,6 +948,116 @@ async def export_events_csv(
 @api.get("/rules")
 async def list_rules(_: dict = Depends(current_user)):
     return RULES_META
+
+
+# -------------------- Reports --------------------
+@api.get("/reports/summary")
+async def reports_summary(start: Optional[str] = None, end: Optional[str] = None,
+                          _: dict = Depends(current_user)):
+    start_dt, end_dt = _reports.parse_range(start, end)
+    alerts = await _reports.collect_alerts(db, start_dt.isoformat(), end_dt.isoformat())
+    incidents = await _reports.collect_incidents(db, start_dt.isoformat(), end_dt.isoformat())
+    return {
+        "start": start_dt.isoformat(),
+        "end": end_dt.isoformat(),
+        **_reports.summary_counts(alerts, incidents),
+    }
+
+
+@api.get("/reports/alerts.csv")
+async def reports_alerts_csv(start: Optional[str] = None, end: Optional[str] = None,
+                              user: dict = Depends(current_user)):
+    from fastapi.responses import StreamingResponse
+    start_dt, end_dt = _reports.parse_range(start, end)
+    alerts = await _reports.collect_alerts(db, start_dt.isoformat(), end_dt.isoformat())
+    csv_text = _reports.alerts_csv(alerts)
+    await audit(user["email"], "report_export", target="alerts.csv",
+                meta={"count": len(alerts), "start": start_dt.isoformat(), "end": end_dt.isoformat()})
+    return StreamingResponse(iter([csv_text]), media_type="text/csv",
+                              headers={"Content-Disposition":
+                                       "attachment; filename=sentinelflow_alerts.csv"})
+
+
+@api.get("/reports/incidents.csv")
+async def reports_incidents_csv(start: Optional[str] = None, end: Optional[str] = None,
+                                 user: dict = Depends(current_user)):
+    from fastapi.responses import StreamingResponse
+    start_dt, end_dt = _reports.parse_range(start, end)
+    incidents = await _reports.collect_incidents(db, start_dt.isoformat(), end_dt.isoformat())
+    csv_text = _reports.incidents_csv(incidents)
+    await audit(user["email"], "report_export", target="incidents.csv",
+                meta={"count": len(incidents), "start": start_dt.isoformat(), "end": end_dt.isoformat()})
+    return StreamingResponse(iter([csv_text]), media_type="text/csv",
+                              headers={"Content-Disposition":
+                                       "attachment; filename=sentinelflow_incidents.csv"})
+
+
+@api.get("/reports/combined.pdf")
+async def reports_combined_pdf(start: Optional[str] = None, end: Optional[str] = None,
+                                user: dict = Depends(current_user)):
+    from fastapi.responses import Response
+    start_dt, end_dt = _reports.parse_range(start, end)
+    alerts = await _reports.collect_alerts(db, start_dt.isoformat(), end_dt.isoformat())
+    incidents = await _reports.collect_incidents(db, start_dt.isoformat(), end_dt.isoformat())
+    pdf_bytes = _reports.combined_pdf(start_dt, end_dt, alerts, incidents, user["email"])
+    await audit(user["email"], "report_export", target="combined.pdf",
+                meta={"alerts": len(alerts), "incidents": len(incidents),
+                      "start": start_dt.isoformat(), "end": end_dt.isoformat()})
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             "attachment; filename=sentinelflow_report.pdf"})
+
+
+# -------------------- Notification prefs (webhooks) --------------------
+class NotificationPrefs(BaseModel):
+    webhook_url: Optional[str] = ""
+    webhook_type: Optional[str] = None  # slack|teams|auto
+    webhook_enabled: Optional[bool] = False
+    webhook_min_severity: Optional[str] = Field(default="Suspicious",
+                                                 pattern="^(Informational|Suspicious|Likely malicious)$")
+
+
+@api.get("/me/notifications")
+async def get_my_notifications(user: dict = Depends(current_user)):
+    doc = await db.users.find_one({"_id": ObjectId(user["id"])}, {"notification_prefs": 1})
+    prefs = (doc or {}).get("notification_prefs") or {}
+    prefs.setdefault("webhook_url", "")
+    prefs.setdefault("webhook_type", None)
+    prefs.setdefault("webhook_enabled", False)
+    prefs.setdefault("webhook_min_severity", "Suspicious")
+    if prefs.get("webhook_url") and not prefs.get("webhook_type"):
+        prefs["webhook_type"] = _webhooks.detect_type(prefs["webhook_url"])
+    return prefs
+
+
+@api.put("/me/notifications")
+async def set_my_notifications(body: NotificationPrefs, user: dict = Depends(current_user)):
+    prefs = body.dict()
+    url = prefs.get("webhook_url") or ""
+    if prefs.get("webhook_enabled") and not url:
+        raise HTTPException(status_code=400, detail="webhook_url is required when enabling")
+    if url and not (url.startswith("https://") or url.startswith("http://")):
+        raise HTTPException(status_code=400, detail="webhook_url must start with http(s)://")
+    if not prefs.get("webhook_type") and url:
+        prefs["webhook_type"] = _webhooks.detect_type(url)
+    await db.users.update_one(
+        {"_id": ObjectId(user["id"])},
+        {"$set": {"notification_prefs": prefs}},
+    )
+    await audit(user["email"], "update_notification_prefs", target=user["id"],
+                meta={"enabled": prefs.get("webhook_enabled"), "type": prefs.get("webhook_type")})
+    return prefs
+
+
+@api.post("/me/notifications/test")
+async def test_my_webhook(user: dict = Depends(current_user)):
+    doc = await db.users.find_one({"_id": ObjectId(user["id"])}, {"notification_prefs": 1})
+    prefs = (doc or {}).get("notification_prefs") or {}
+    if not prefs.get("webhook_url"):
+        raise HTTPException(status_code=400, detail="No webhook configured")
+    result = await _webhooks.send_test(prefs["webhook_url"],
+                                        prefs.get("webhook_type"))
+    return {"result": result}
 
 
 # -------------------- Dashboard --------------------

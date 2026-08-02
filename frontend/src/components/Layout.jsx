@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   ShieldAlert, LayoutDashboard, Search, Bell, Upload, Radar,
-  Users, FileText, LogOut, Circle, AlertTriangle, HardDrive,
+  Users, FileText, LogOut, Circle, AlertTriangle, HardDrive, BarChart3, MessageSquare,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Toaster } from "sonner";
@@ -14,6 +14,8 @@ const NAV = [
   { to: "/sources", label: "Log Sources", icon: HardDrive, testid: "nav-sources" },
   { to: "/ingest", label: "Ingestion", icon: Upload, testid: "nav-ingest" },
   { to: "/rules", label: "Detection Rules", icon: Radar, testid: "nav-rules" },
+  { to: "/reports", label: "Reports", icon: BarChart3, testid: "nav-reports" },
+  { to: "/notifications", label: "Notifications", icon: MessageSquare, testid: "nav-notifications" },
 ];
 const ADMIN_NAV = [
   { to: "/users", label: "Users", icon: Users, testid: "nav-users" },
