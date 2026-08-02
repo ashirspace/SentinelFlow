@@ -10,7 +10,7 @@ CANONICAL_FIELDS = [
     "event_id", "timestamp", "src_ip", "dst_ip", "src_port", "dst_port",
     "protocol", "user", "host", "app", "url", "http_method", "http_status",
     "severity", "risk_score", "rule_id", "correlation_id", "action",
-    "country", "raw_log",
+    "country", "user_agent", "raw_log",
 ]
 
 # Simple key aliases so common auth-log / web-access-log formats work out of the box.
@@ -28,6 +28,7 @@ FIELD_ALIASES = {
     "geo_country": "country", "src_country": "country",
     "protocol_name": "protocol",
     "source_port": "src_port", "destination_port": "dst_port",
+    "user-agent": "user_agent", "useragent": "user_agent", "ua": "user_agent",
 }
 
 
@@ -91,6 +92,7 @@ def normalize_record(raw: Dict[str, Any], source_name: str) -> Dict[str, Any]:
     event["correlation_id"] = flat.get("correlation_id")
     event["action"] = flat.get("action") or flat.get("event")
     event["country"] = (flat.get("country") or "").upper() or None
+    event["user_agent"] = flat.get("user_agent")
     event["source_name"] = source_name
     event["raw_log"] = raw
     return event
@@ -125,9 +127,17 @@ def _to_int(v: Any):
 
 
 def parse_upload(filename: str, content: bytes) -> List[Dict[str, Any]]:
-    """Return raw records list from JSON or CSV file bytes."""
+    """Return raw records list from JSON, NDJSON, CSV, or Syslog file bytes."""
+    from syslog_parser import parse_syslog, looks_like_syslog
     name = (filename or "").lower()
     text = content.decode("utf-8", errors="replace")
+
+    if name.endswith((".syslog", ".log")) or looks_like_syslog(text):
+        records = parse_syslog(text)
+        if records:
+            return records
+        # fall through to other parsers if syslog didn't match any line
+
     if name.endswith(".json") or text.lstrip().startswith(("[", "{")):
         data = json.loads(text)
         if isinstance(data, dict):
@@ -146,4 +156,4 @@ def parse_upload(filename: str, content: bytes) -> List[Dict[str, Any]]:
     try:
         return [json.loads(ln) for ln in lines]
     except Exception:
-        raise ValueError("Unsupported file format. Use JSON, NDJSON, or CSV.")
+        raise ValueError("Unsupported file format. Use JSON, NDJSON, CSV, or Syslog.")

@@ -41,6 +41,35 @@ def sample_events() -> List[Dict[str, Any]]:
         user=None, src_ip="185.220.101.1", dst_ip="10.0.0.5",
         url="/admin", http_method="GET", http_status="200", host="web-01")
 
+    # R007: Rate anomaly — 150 web requests from the same IP inside 1 minute
+    scraper_ip = "203.0.113.77"
+    for i in range(150):
+        add(minutes_ago=60 - (i / 200.0),
+            app="web", action="request", src_ip=scraper_ip,
+            url=f"/api/products/{i}", http_method="GET",
+            http_status="200", host="web-01",
+            user_agent="python-requests/2.31")
+
+    # R008: Injection patterns
+    add(minutes_ago=55, app="web", action="request",
+        src_ip="198.51.100.7", url="/search?q=' OR 1=1--",
+        http_method="GET", http_status="200", host="web-01",
+        user_agent="Mozilla/5.0")
+    add(minutes_ago=54, app="web", action="request",
+        src_ip="198.51.100.8", url="/comment?body=<script>alert(1)</script>",
+        http_method="GET", http_status="200", host="web-01",
+        user_agent="Mozilla/5.0")
+    add(minutes_ago=53, app="web", action="request",
+        src_ip="198.51.100.9", url="/files?path=../../etc/passwd",
+        http_method="GET", http_status="200", host="web-01",
+        user_agent="curl/8.0")
+
+    # R009: New-device admin login (matches seeded admin@sentinelflow.io)
+    add(minutes_ago=15, app="auth", action="login",
+        user="admin@sentinelflow.io", src_ip="203.0.113.200",
+        http_status="success", country="US", host="auth-01",
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15")
+
     # Privilege escalation
     add(minutes_ago=90, app="linux", action="privilege_escalation",
         user="deployer", host="prod-db-01", http_status="success")

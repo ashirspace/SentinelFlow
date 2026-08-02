@@ -20,8 +20,9 @@ from auth import (
     set_auth_cookies, clear_auth_cookies, get_current_user,
 )
 from normalize import normalize_record, parse_upload
-from rules import run_all_rules, detect_silent_sources, RULES_META
+from rules import run_all_rules, detect_silent_sources, detect_new_device_admin, RULES_META
 from seed import sample_events, demo_sources
+from notifier import notify_alerts, is_enabled as email_enabled
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -232,8 +233,16 @@ async def _ingest_events(records: list, source_name: str, actor_email: str):
 
     # run detection
     alerts = run_all_rules(normalized)
+    async_alerts = await detect_new_device_admin(db, normalized)
+    alerts.extend(async_alerts)
     if alerts:
         await db.alerts.insert_many([dict(a) for a in alerts])
+        # fire-and-log emails (never raises)
+        try:
+            statuses = await notify_alerts(db, alerts)
+            logger.info("notify_alerts: %s", {s: statuses.count(s) for s in set(statuses)})
+        except Exception as e:
+            logger.warning("Notifier failed: %s", e)
     await audit(actor_email, "ingest", target=source_name,
                 meta={"count": len(normalized), "alerts": len(alerts)})
     return {"ingested": len(normalized), "alerts": len(alerts)}
@@ -250,6 +259,33 @@ async def ingest(source_name: str = Query(...), file: UploadFile = File(...),
     if not isinstance(records, list) or not records:
         raise HTTPException(status_code=400, detail="No records found in file")
     return await _ingest_events(records, source_name, user["email"])
+
+
+class SyslogBody(BaseModel):
+    source_name: str
+    text: str
+
+
+@api.post("/ingest/syslog")
+async def ingest_syslog(body: SyslogBody, user: dict = Depends(current_user)):
+    """Accept a raw syslog payload (RFC-5424 or RFC-3164) as a JSON string."""
+    from syslog_parser import parse_syslog
+    records = parse_syslog(body.text)
+    if not records:
+        raise HTTPException(status_code=400, detail="No syslog lines could be parsed")
+    return await _ingest_events(records, body.source_name, user["email"])
+
+
+# -------------------- Notifier status --------------------
+@api.get("/notifier/status")
+async def notifier_status(_: dict = Depends(current_user)):
+    return {
+        "enabled": email_enabled(),
+        "min_severity": os.environ.get("ALERT_EMAIL_MIN_SEVERITY", "Suspicious"),
+        "dedup_hours": int(os.environ.get("ALERT_EMAIL_DEDUP_HOURS", "1") or 1),
+        "recipients": [e.strip() for e in os.environ.get("ALERT_EMAIL_TO", "").split(",") if e.strip()],
+        "smtp_host": os.environ.get("SMTP_HOST", ""),
+    }
 
 
 @api.post("/ingest/seed")
@@ -465,6 +501,9 @@ async def startup():
     await db.alerts.create_index("created_at")
     await db.alerts.create_index("status")
     await db.log_sources.create_index("name", unique=True)
+    await db.known_devices.create_index([("user", 1), ("src_ip", 1), ("user_agent", 1)], unique=True)
+    # notification dedup TTL — MongoDB will auto-delete expired keys
+    await db.alert_notifications.create_index("expires_at", expireAfterSeconds=0)
     # TTL: purge raw_logs older than 72h (259200s). Uses BSON date field.
     await db.raw_logs.create_index("created_at_bson", expireAfterSeconds=72 * 3600)
 

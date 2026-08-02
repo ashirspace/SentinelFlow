@@ -3,6 +3,7 @@
 Every rule returns a list of alerts. Every alert cites raw evidence
 (list of normalized event_ids) and includes a human-readable explanation.
 """
+import re
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any
@@ -76,6 +77,33 @@ RULES_META = [
         "severity": "Suspicious",
         "template": "Log source '{source}' has been silent for {minutes} minutes — possible outage or tampering.",
     },
+    {
+        "rule_id": "R007",
+        "name": "Excessive API requests / rate anomaly",
+        "condition": "N or more web requests from the same source IP within T minutes",
+        "threshold": 120,
+        "window_minutes": 1,
+        "severity": "Suspicious",
+        "template": "IP {src_ip} issued {count} web requests within {window} minute(s) — exceeds threshold of {threshold}. Possible scraping, credential stuffing, or DoS.",
+    },
+    {
+        "rule_id": "R008",
+        "name": "Injection pattern in URL",
+        "condition": "URL contains SQL-injection, XSS, or directory-traversal signatures",
+        "threshold": 1,
+        "window_minutes": 0,
+        "severity": "Likely malicious",
+        "template": "Request from {src_ip} to {url} matched {pattern_class} pattern '{pattern}' at {when} — probable exploitation attempt.",
+    },
+    {
+        "rule_id": "R009",
+        "name": "New-device admin login",
+        "condition": "Successful login by an admin user from an (IP, user-agent) fingerprint never seen before for that user",
+        "threshold": 1,
+        "window_minutes": 0,
+        "severity": "Suspicious",
+        "template": "Admin user {user} logged in from a new device fingerprint {src_ip} · {user_agent} at {when} — verify the login was expected.",
+    },
 ]
 
 
@@ -106,6 +134,9 @@ def _recommended_action(rule_id: str) -> str:
         "R004": "Verify change was authorized. Roll back if unapproved.",
         "R005": "Isolate affected host. Review lateral movement. Approve firewall block manually.",
         "R006": "Verify agent/collector health. Check network path and disk usage.",
+        "R007": "Apply WAF rate-limit rule for this IP after human review. Check for scraping or abuse.",
+        "R008": "Block the request pattern at the WAF (human-approved). Audit vulnerable endpoint code.",
+        "R009": "Contact the admin user out-of-band. Force MFA re-enrollment if login not recognized.",
     }[rule_id]
 
 
@@ -284,11 +315,137 @@ async def detect_silent_sources(db) -> List[Dict[str, Any]]:
 
 
 def run_all_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Run all synchronous rules (R001–R005) over a batch of events."""
+    """Run all synchronous rules (R001–R005, R007, R008) over a batch of events."""
     return (
         detect_brute_force(events)
         + detect_success_after_fail(events)
         + detect_off_hours_or_unusual_country(events)
         + detect_priv_escalation(events)
         + detect_malicious_ip(events)
+        + detect_rate_anomaly(events)
+        + detect_injection_patterns(events)
     )
+
+
+# -------------------- R007: Rate anomaly --------------------
+
+def detect_rate_anomaly(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rule = _get("R007")
+    window = timedelta(minutes=rule["window_minutes"])
+    threshold = rule["threshold"]
+    by_ip: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for e in events:
+        if e.get("app") == "web" and e.get("src_ip"):
+            by_ip[e["src_ip"]].append(e)
+    alerts = []
+    for ip, ev_list in by_ip.items():
+        ev_list.sort(key=lambda x: x["timestamp"])
+        for i in range(len(ev_list)):
+            window_evts = [ev_list[i]]
+            for j in range(i + 1, len(ev_list)):
+                t_i = datetime.fromisoformat(ev_list[i]["timestamp"])
+                t_j = datetime.fromisoformat(ev_list[j]["timestamp"])
+                if t_j - t_i <= window:
+                    window_evts.append(ev_list[j])
+                else:
+                    break
+            if len(window_evts) >= threshold:
+                evidence = [e["event_id"] for e in window_evts[:20]]  # cap
+                explanation = rule["template"].format(
+                    src_ip=ip, count=len(window_evts),
+                    window=rule["window_minutes"], threshold=threshold,
+                )
+                alerts.append(_new_alert(
+                    rule, explanation, evidence, rule["severity"],
+                    {"src_ip": ip, "count": len(window_evts)},
+                ))
+                break
+    return alerts
+
+
+# -------------------- R008: Injection patterns --------------------
+
+_INJECTION_PATTERNS = [
+    ("sqli", re.compile(r"(?i)union\s+select|or\s+1=1|--(?:\s|$)|\bselect\b.+\bfrom\b|xp_cmdshell|;\s*drop\s+table|information_schema")),
+    ("xss",  re.compile(r"(?i)<script|javascript:|onerror\s*=|onload\s*=|<iframe|document\.cookie|<img[^>]+src\s*=\s*['\"]?javascript:")),
+    ("traversal", re.compile(r"\.\./|\.\.\\|%2e%2e[/\\]|%2e%2e%2f|/etc/passwd|c:\\windows\\", re.IGNORECASE)),
+]
+
+
+def detect_injection_patterns(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rule = _get("R008")
+    alerts = []
+    for e in events:
+        url = e.get("url") or ""
+        if not url:
+            continue
+        try:
+            from urllib.parse import unquote
+            decoded = unquote(url)
+        except Exception:
+            decoded = url
+        for cls, pattern in _INJECTION_PATTERNS:
+            m = pattern.search(decoded) or pattern.search(url)
+            if m:
+                explanation = rule["template"].format(
+                    src_ip=e.get("src_ip") or "unknown", url=url,
+                    pattern_class=cls.upper(), pattern=m.group(0)[:40],
+                    when=e["timestamp"],
+                )
+                alerts.append(_new_alert(
+                    rule, explanation, [e["event_id"]], rule["severity"],
+                    {"src_ip": e.get("src_ip"), "url": url,
+                     "pattern_class": cls, "pattern": m.group(0)[:80]},
+                ))
+                break  # one alert per event
+    return alerts
+
+
+# -------------------- R009: New-device admin login --------------------
+
+async def detect_new_device_admin(db, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Async detector: requires the users collection to know admin identity."""
+    rule = _get("R009")
+    alerts: List[Dict[str, Any]] = []
+    # candidates: successful auth logins with user + src_ip + user_agent
+    candidates = [
+        e for e in events
+        if e.get("app") == "auth"
+        and str(e.get("http_status")) in ("success", "200", "ok")
+        and e.get("user") and e.get("src_ip") and e.get("user_agent")
+    ]
+    if not candidates:
+        return alerts
+
+    # who is an admin? match on email OR name
+    user_names = list({e["user"] for e in candidates})
+    admin_docs = await db.users.find(
+        {"role": "admin", "$or": [
+            {"email": {"$in": user_names}},
+            {"name": {"$in": user_names}},
+        ]},
+        {"email": 1, "name": 1},
+    ).to_list(200)
+    admin_identities = {d.get("email") for d in admin_docs} | {d.get("name") for d in admin_docs}
+    admin_identities.discard(None)
+
+    for e in candidates:
+        if e["user"] not in admin_identities:
+            continue
+        fp = {"user": e["user"], "src_ip": e["src_ip"], "user_agent": e["user_agent"]}
+        exists = await db.known_devices.find_one(fp)
+        if exists:
+            continue
+        await db.known_devices.insert_one({
+            **fp,
+            "first_seen": e["timestamp"],
+        })
+        explanation = rule["template"].format(
+            user=e["user"], src_ip=e["src_ip"],
+            user_agent=e["user_agent"][:80], when=e["timestamp"],
+        )
+        alerts.append(_new_alert(
+            rule, explanation, [e["event_id"]], rule["severity"],
+            {"user": e["user"], "src_ip": e["src_ip"], "user_agent": e["user_agent"]},
+        ))
+    return alerts

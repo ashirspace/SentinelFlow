@@ -5,7 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { UploadCloud, Server } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { UploadCloud, Server, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Ingest() {
@@ -14,6 +16,8 @@ export default function Ingest() {
   const [newSource, setNewSource] = useState({ name: "", type: "auth", description: "" });
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [syslogText, setSyslogText] = useState("");
+  const [syslogBusy, setSyslogBusy] = useState(false);
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -63,6 +67,28 @@ export default function Ingest() {
     }
   };
 
+  const submitSyslog = async (e) => {
+    e.preventDefault();
+    if (!selectedSource || !syslogText.trim()) {
+      toast.error("Pick a source and paste syslog lines");
+      return;
+    }
+    setSyslogBusy(true);
+    try {
+      const { data } = await api.post("/ingest/syslog", {
+        source_name: selectedSource,
+        text: syslogText,
+      });
+      toast.success(`Parsed ${data.ingested} syslog lines · ${data.alerts} alerts`);
+      setSyslogText("");
+      await load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Syslog ingest failed");
+    } finally {
+      setSyslogBusy(false);
+    }
+  };
+
   return (
     <div className="pb-16">
       <PageHeader
@@ -72,58 +98,96 @@ export default function Ingest() {
 
       <div className="px-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Upload */}
-        <form onSubmit={upload} className="border border-border/60 rounded-md bg-card/40 p-6" data-testid="ingest-form">
+        <div className="border border-border/60 rounded-md bg-card/40 p-6" data-testid="ingest-panel">
           <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
-            /// Upload logs
+            /// Ingest logs
           </div>
-          <h2 className="text-base font-semibold mb-4">New ingestion batch</h2>
+          <h2 className="text-base font-semibold mb-4">New batch</h2>
 
-          <div className="space-y-4">
-            <div>
-              <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
-                Source
-              </Label>
-              <Select value={selectedSource} onValueChange={setSelectedSource}>
-                <SelectTrigger className="mt-1.5 font-mono" data-testid="ingest-source-select">
-                  <SelectValue placeholder="Select a source" />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border border-border">
-                  {sources.map((s) => (
-                    <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="mb-4">
+            <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+              Source
+            </Label>
+            <Select value={selectedSource} onValueChange={setSelectedSource}>
+              <SelectTrigger className="mt-1.5 font-mono" data-testid="ingest-source-select">
+                <SelectValue placeholder="Select a source" />
+              </SelectTrigger>
+              <SelectContent className="bg-popover border border-border">
+                {sources.map((s) => (
+                  <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-            <div>
-              <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
-                File (.json, .ndjson, .csv)
-              </Label>
-              <label className="mt-1.5 block border border-dashed border-border rounded-md p-6 text-center cursor-pointer hover:bg-white/[0.03]" style={{ transition: "background-color 0.15s ease" }}>
-                <input
-                  ref={fileRef}
-                  data-testid="ingest-file-input"
-                  type="file"
-                  className="hidden"
-                  accept=".json,.ndjson,.csv,.log,.txt"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                />
-                <UploadCloud className="w-6 h-6 mx-auto text-muted-foreground" />
-                <div className="mt-2 text-xs font-mono">
-                  {file ? file.name : "Click to choose a file"}
+          <Tabs defaultValue="file" className="w-full">
+            <TabsList className="grid grid-cols-2 w-full bg-secondary">
+              <TabsTrigger value="file" data-testid="tab-file" className="font-mono text-xs uppercase tracking-widest">
+                File upload
+              </TabsTrigger>
+              <TabsTrigger value="syslog" data-testid="tab-syslog" className="font-mono text-xs uppercase tracking-widest">
+                Paste syslog
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="file">
+              <form onSubmit={upload} className="space-y-4 mt-4" data-testid="ingest-form">
+                <div>
+                  <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+                    File (.json, .ndjson, .csv, .log/.syslog)
+                  </Label>
+                  <label className="mt-1.5 block border border-dashed border-border rounded-md p-6 text-center cursor-pointer hover:bg-white/[0.03]" style={{ transition: "background-color 0.15s ease" }}>
+                    <input
+                      ref={fileRef}
+                      data-testid="ingest-file-input"
+                      type="file"
+                      className="hidden"
+                      accept=".json,.ndjson,.csv,.log,.syslog,.txt"
+                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    />
+                    <UploadCloud className="w-6 h-6 mx-auto text-muted-foreground" />
+                    <div className="mt-2 text-xs font-mono">
+                      {file ? file.name : "Click to choose a file"}
+                    </div>
+                  </label>
                 </div>
-              </label>
-            </div>
+                <Button
+                  type="submit"
+                  disabled={uploading || !file || !selectedSource}
+                  data-testid="ingest-submit"
+                  className="w-full font-mono text-xs uppercase tracking-widest"
+                >
+                  {uploading ? "Uploading…" : "Ingest & detect"}
+                </Button>
+              </form>
+            </TabsContent>
 
-            <Button
-              type="submit"
-              disabled={uploading || !file || !selectedSource}
-              data-testid="ingest-submit"
-              className="w-full font-mono text-xs uppercase tracking-widest"
-            >
-              {uploading ? "Uploading…" : "Ingest & detect"}
-            </Button>
-          </div>
+            <TabsContent value="syslog">
+              <form onSubmit={submitSyslog} className="space-y-4 mt-4" data-testid="syslog-form">
+                <div>
+                  <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                    <Terminal className="w-3 h-3" />
+                    Syslog lines (RFC-5424 or RFC-3164)
+                  </Label>
+                  <Textarea
+                    data-testid="syslog-textarea"
+                    value={syslogText}
+                    onChange={(e) => setSyslogText(e.target.value)}
+                    placeholder={`<38>1 2026-02-02T18:00:00Z auth-01 sshd 1234 ID47 - Failed password user=eve src_ip=45.155.205.233\n<34>Aug  2 18:05:12 auth-01 sshd[9821]: Failed password for admin from 203.0.113.99 port 55432`}
+                    className="mt-1.5 font-mono text-[11px] min-h-[160px]"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  disabled={syslogBusy || !syslogText.trim() || !selectedSource}
+                  data-testid="syslog-submit"
+                  className="w-full font-mono text-xs uppercase tracking-widest"
+                >
+                  {syslogBusy ? "Parsing…" : "Parse & detect"}
+                </Button>
+              </form>
+            </TabsContent>
+          </Tabs>
 
           <div className="mt-6 border-t border-border/60 pt-4">
             <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
@@ -132,10 +196,10 @@ export default function Ingest() {
             <div className="text-[11px] font-mono text-muted-foreground leading-relaxed">
               ip / source_ip / client_ip → src_ip · username / userid → user ·
               status / code → http_status · time / ts / @timestamp → timestamp ·
-              method → http_method · path / uri → url
+              method → http_method · path / uri → url · user-agent / ua → user_agent
             </div>
           </div>
-        </form>
+        </div>
 
         {/* Sources */}
         <div>

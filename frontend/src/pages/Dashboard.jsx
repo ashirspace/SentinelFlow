@@ -4,7 +4,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   BarChart, Bar, PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { Activity, Bell, AlertOctagon, EyeOff, ArrowUpRight } from "lucide-react";
+import { Activity, Bell, AlertOctagon, EyeOff, ArrowUpRight, Mail, MailX } from "lucide-react";
 import api from "@/lib/api";
 import { PageHeader, SeverityBadge } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -22,15 +22,18 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [seeding, setSeeding] = useState(false);
+  const [notifier, setNotifier] = useState(null);
 
   const load = async () => {
     try {
-      const [s, a] = await Promise.all([
+      const [s, a, n] = await Promise.all([
         api.get("/dashboard/stats"),
         api.get("/alerts"),
+        api.get("/notifier/status"),
       ]);
       setStats(s.data);
       setAlerts(a.data.slice(0, 6));
+      setNotifier(n.data);
     } catch (e) {
       toast.error("Failed to load dashboard");
     }
@@ -57,17 +60,35 @@ export default function Dashboard() {
         title="Security Operations"
         subtitle="Real-time posture across your ingested log sources."
         right={
-          user?.role === "admin" && (
-            <Button
-              onClick={seed}
-              disabled={seeding}
-              variant="outline"
-              data-testid="seed-demo-btn"
-              className="font-mono text-xs uppercase tracking-widest"
-            >
-              {seeding ? "Loading…" : "Load Demo Data"}
-            </Button>
-          )
+          <div className="flex items-center gap-3">
+            {notifier && (
+              <div
+                data-testid="notifier-pill"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-[10px] font-mono uppercase tracking-widest ${
+                  notifier.enabled
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                    : "bg-zinc-500/10 text-zinc-400 border-zinc-500/25"
+                }`}
+                title={notifier.enabled
+                  ? `SMTP: ${notifier.smtp_host} · to ${notifier.recipients.length} recipients`
+                  : "SMTP not configured — set SMTP_HOST, SMTP_FROM, ALERT_EMAIL_TO in backend/.env"}
+              >
+                {notifier.enabled ? <Mail className="w-3 h-3" /> : <MailX className="w-3 h-3" />}
+                Email · {notifier.enabled ? "on" : "off"}
+              </div>
+            )}
+            {user?.role === "admin" && (
+              <Button
+                onClick={seed}
+                disabled={seeding}
+                variant="outline"
+                data-testid="seed-demo-btn"
+                className="font-mono text-xs uppercase tracking-widest"
+              >
+                {seeding ? "Loading…" : "Load Demo Data"}
+              </Button>
+            )}
+          </div>
         }
       />
 
