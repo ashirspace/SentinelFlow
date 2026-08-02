@@ -56,6 +56,25 @@ Build the MVP of SentinelFlow, an explainable SIEM (Security Information & Event
 - **Normalize schema**: added `user_agent` canonical field with aliases (`user-agent`, `ua`, `useragent`).
 - **Testing**: 33/33 backend pytest passed; frontend E2E for the 3 new features (notifier-pill, 9 rule cards, syslog paste) green.
 
+## Iteration 3 — 2026-02-02
+- **Response Actions (human-approved)** — `responses.py` executors, endpoint `POST /api/alerts/{id}/approve`. All 4 action types with per-rule allow-list (`RECOMMENDED_BY_RULE`), each writing a `response_actions` row AND an `audit_logs` row with approver + result:
+  - `block_ip` → writes to `ip_blocklist`. **R010** rule appended (auto-fires on future events from the blocked IP), Likely malicious.
+  - `disable_account` → SentinelFlow-managed users set `disabled=true` + `token_version` bumped; external accounts get result `recommended_external` with copy-paste recommendation text.
+  - `revoke_session` → bumps `users.token_version`; JWT `tv` claim mismatch immediately invalidates existing sessions.
+  - `escalate_incident` → creates row in new `incidents` collection with alert evidence prefilled. Repeat call on same alert links instead of duplicating.
+- **Log Management**:
+  - `GET /api/sources` includes computed `health` (healthy / delayed / silent), `retention_hours`, `paused`.
+  - `PATCH /api/sources/{name}` for pause + retention override (1–72h).
+  - `POST /api/sources/{name}/rotate-key` returns a fresh `ingest_api_key`.
+  - `DELETE /api/sources/{name}?purge_events=true|false`.
+  - **Per-source raw retention** enforced via new per-doc `expires_at` field + TTL index on `raw_logs.expires_at` (replaces the old fixed-72h index).
+- **Log Explorer additions**:
+  - `PATCH /api/events/{event_id}` for tags / note / reviewed.
+  - `GET /api/export/events.csv?...` streams filtered events as CSV.
+- **Auth updates**: JWT carries `tv` (token_version); `get_current_user` rejects `Session revoked` and `Account disabled`.
+- **New frontend pages**: **Log Sources** (health, retention dialog, rotate-key dialog), **Incidents** (list + drawer with linked alerts + evidence). Alerts drawer now has a Response Actions panel with an "Approve" button per allowed action + Approvals history. Log Explorer has Export CSV + annotations panel.
+- **Testing**: 60/60 backend pytest passed (27 new + 33 regression); frontend E2E all green after fixing an initial `exportCsv` undef in Explorer.jsx.
+
 ## Prioritized backlog (deferred for follow-up prompts, per problem statement)
 ### P1
 - Event correlation across multiple rules → incidents (group related alerts under one incident id)

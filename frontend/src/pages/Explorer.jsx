@@ -39,6 +39,58 @@ export default function Explorer() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [severity, appName]);
 
+  const filterParams = () => {
+    const p = new URLSearchParams();
+    if (q) p.set("q", q);
+    if (severity !== "all") p.set("severity", severity);
+    if (appName !== "all") p.set("app_name", appName);
+    return p.toString();
+  };
+
+  const exportCsv = () => {
+    window.open(`${API_BASE}/export/events.csv?${filterParams()}`, "_blank");
+  };
+
+  const openRow = (ev) => {
+    setSelected(ev);
+    setTagInput((ev.tags || []).join(", "));
+    setNoteInput("");
+  };
+
+  const saveTags = async () => {
+    if (!selected) return;
+    const tags = tagInput.split(",").map((t) => t.trim()).filter(Boolean);
+    try {
+      await api.patch(`/events/${selected.event_id}`, { tags });
+      toast.success("Tags saved");
+      setSelected({ ...selected, tags });
+      await load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const addNote = async () => {
+    if (!selected || !noteInput.trim()) return;
+    try {
+      await api.patch(`/events/${selected.event_id}`, { note: noteInput });
+      toast.success("Note added");
+      const notes = [...(selected.notes || []), { at: new Date().toISOString(), by: "you", text: noteInput }];
+      setSelected({ ...selected, notes });
+      setNoteInput("");
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const toggleReviewed = async () => {
+    if (!selected) return;
+    const next = !selected.reviewed;
+    try {
+      await api.patch(`/events/${selected.event_id}`, { reviewed: next });
+      toast.success(next ? "Marked reviewed" : "Marked unreviewed");
+      setSelected({ ...selected, reviewed: next });
+      await load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+
   return (
     <div className="pb-16">
       <PageHeader
