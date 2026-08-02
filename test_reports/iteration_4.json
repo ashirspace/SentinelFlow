@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 4 push-only v1 ingest testing. Backend: 17/18 iter4 pytest tests pass (all v1 auth/rate-limit/body/validation, key rotation+revoke, audit trail, ping, config, R005 detection over v1, and RBAC on POST /sources). Frontend: Sources page — endpoint card + add-source dialog + reveal dialog + 4 snippet tabs + rotate/revoke buttons + source-row testid all render as specified. Explorer route now loads without crash (export-csv-btn present, no ReferenceError). Two real bugs found: (1) GET /api/sources leaks ingest_api_key_hash (sha256) in response — the projection excludes 'ingest_api_key' (a non-existent field) but forgets 'ingest_api_key_hash'. Only plaintext should never leave the server; the hash also should not be returned since it enables offline verification against a stolen keyset. (2) The reveal-dialog copy-endpoint button is missing its data-testid because IngestSnippets.CopyRow accepts prop name 'testid' but Sources/IngestSnippets passes 'data-testid' on the endpoint row (line 95 of IngestSnippets.jsx) — the api-key row correctly uses testid='copy-api-key' and renders. Rate limit, body size 413, event-count 400, non-object 400, paused 423, bearer/x-ingest-key both work, wrong-key 401, no-key 401, cross-endpoint auth all confirmed 401. Rotate invalidates old key, revoke removes hint. Audit rows created for create/rotate/revoke with actor=admin@sentinelflow.io.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/sources", "issue": "Leaks ingest_api_key_hash (sha256) in every row. Projection at server.py:203 excludes 'ingest_api_key' (unused field) but not 'ingest_api_key_hash'. Should be {\"_id\": 0, \"ingest_api_key_hash\": 0}. Also — new-created source POST response echoes doc but strips hash correctly (server.py:244), so only list endpoint is affected.", "priority": "MEDIUM"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "IngestSnippets.jsx (reveal-dialog)", "issue": "Endpoint copy button lacks data-testid='copy-endpoint'. In Sources.jsx the CopyRow on line 95 is passed `data-testid=\"copy-endpoint\"` but CopyRow destructures prop name `testid` (not data-testid), so the attribute is silently dropped. The api-key row correctly uses `testid=\"copy-api-key\"` and works. Fix: change line 95 to `testid=\"copy-endpoint\"`.", "selector": "[data-testid='copy-endpoint']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "All Radix dialogs", "issues": ["Console warnings: Missing `Description` or `aria-describedby` on DialogContent (a11y)."]},
+      {"screen": "Dashboard", "issues": ["Recharts width/height=-1 warnings on first paint (carried from iter1-3, cosmetic)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [
+    "server.py list_sources: change projection to `{\"_id\": 0, \"ingest_api_key_hash\": 0}` so the sha256 hash is not returned on GET /api/sources.",
+    "IngestSnippets.jsx line 95: use `testid=\"copy-endpoint\"` (not `data-testid`) so the endpoint copy button actually gets the required test id.",
+    "Optional: pass a DialogDescription (or aria-describedby) on new-source/reveal/retention dialogs to silence Radix a11y warnings."
+  ],
+  "critical_code_review_comments": [
+    "server.py list_sources projection is incorrect — the 'ingest_api_key' field does not exist on any doc (create_source stores only 'ingest_api_key_hash' + 'ingest_api_key_hint'). So the exclusion is a no-op and the sha256 hash leaks.",
+    "ingest_v1.check_rate uses time.monotonic() with an in-memory deque per key_hash — resets on server restart. Single-pod OK; multi-replica deployment will need Redis or Mongo-backed limiter. Also, rotate-key does not call reset_rate(old_hash); harmless in practice because the old hash never authenticates again (dropped from db), but leaves stale entries in _RATE map until process restart.",
+    "v1 /ingest reads request.body() AFTER auth check, so the 1MB check is on decoded raw bytes — good; however a client can still send >1MB and consume bandwidth. Consider Content-Length pre-check to reject earlier.",
+    "ingest_v1.extract_key checks Authorization first then X-Ingest-Key — clean fallback; but 'bearer' case-insensitive check accepts 'BEARER ' etc.",
+    "audit rows for the v1 ingest path use actor `key:<source_name>` — not a real email but disambiguates from cookie flows. Fine and documented via prefix.",
+    "server.py rotate_source_key does not invalidate rate-limit state for the previous hash — leaked memory over many rotations. Low impact.",
+    "IngestSnippets.jsx uses `new URL(ingestEndpoint).host` — if `FRONTEND_URL` env is empty the endpoint falls back to '/api/v1/ingest' and `new URL('/api/v1/ingest')` throws. In this preview it is set so not exercised, but is a fragile path.",
+    "Sources.jsx uses window.confirm() for rotate/revoke/delete — works but is jarring; consider a shadcn AlertDialog for consistency."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {"backend": "94% (17/18 iter4 pytest; the one failure surfaces a real backend bug — hash leak)", "frontend": "95% (all iter4 flows work; copy-endpoint testid missing)"},
+  "test_credentials": "Admin: admin@sentinelflow.io / Admin@12345; Analyst: analyst@sentinelflow.io / Analyst@123",
+  "seed_data_creation": "Created and deleted TEST_iter4_* sources during test. Rate-limit test source is fully cleaned up. R005 alert created via v1 with src_ip 185.220.101.1 remains in the alerts collection (as intended for regression evidence).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration4.py is self-contained (module-scoped admin session + temp source fixture). It creates a temp source, exercises v1 auth/rate-limit/body/validation, cross-endpoint 401, rotate/revoke, audit, config, ping, R005 detection, and rate-limit 429. Only one assertion fails: GET /api/sources leaks ingest_api_key_hash. Fixing server.py:203 projection to exclude 'ingest_api_key_hash' makes it 18/18. Rate-limit test creates fresh source to isolate from other tests — safe to rerun. Explorer bug from iter3 is resolved.",
+  "rca of the issue": "GET /api/sources leaks sha256 key hash — server.py list_sources() uses `find({}, {\"_id\": 0, \"ingest_api_key\": 0})`. The `ingest_api_key` field name is a legacy placeholder — create_source() actually stores `ingest_api_key_hash` (+ `ingest_api_key_hint`). Therefore the exclusion is a no-op, and every listed source ships its hash. Reproduction: `curl -b cookies https://.../api/sources | jq '.[0].ingest_api_key_hash'`. Mitigation: change projection to `{\"_id\": 0, \"ingest_api_key_hash\": 0}` (keep the hint — it is intentionally shown). Alternatively, whitelist fields explicitly."
+}

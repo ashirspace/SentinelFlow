@@ -13,7 +13,6 @@ import { toast } from "sonner";
 export default function Ingest() {
   const [sources, setSources] = useState([]);
   const [selectedSource, setSelectedSource] = useState("");
-  const [newSource, setNewSource] = useState({ name: "", type: "auth", description: "" });
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [syslogText, setSyslogText] = useState("");
@@ -27,19 +26,6 @@ export default function Ingest() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
-
-  const createSource = async (e) => {
-    e.preventDefault();
-    if (!newSource.name) return;
-    try {
-      await api.post("/sources", newSource);
-      toast.success("Source created");
-      setNewSource({ name: "", type: "auth", description: "" });
-      await load();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed");
-    }
-  };
 
   const upload = async (e) => {
     e.preventDefault();
@@ -92,8 +78,8 @@ export default function Ingest() {
   return (
     <div className="pb-16">
       <PageHeader
-        title="Log Ingestion"
-        subtitle="Upload JSON, NDJSON, or CSV log files. SentinelFlow normalizes them into the common schema and runs detection on ingest."
+        title="Log Ingestion (batch)"
+        subtitle="One-time batch upload for JSON, NDJSON, CSV, or Syslog files. For live streaming from a website, create a source under Log Sources and use the push endpoint."
       />
 
       <div className="px-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -203,65 +189,13 @@ export default function Ingest() {
 
         {/* Sources */}
         <div>
-          <form onSubmit={createSource} className="border border-border/60 rounded-md bg-card/40 p-6 mb-4" data-testid="new-source-form">
-            <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
-              /// New source
-            </div>
-            <h2 className="text-base font-semibold mb-4">Register a log source</h2>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
-                  Name
-                </Label>
-                <Input
-                  data-testid="new-source-name"
-                  value={newSource.name}
-                  onChange={(e) => setNewSource({ ...newSource, name: e.target.value })}
-                  placeholder="e.g. auth-server-02"
-                  className="mt-1.5 font-mono"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
-                  Type
-                </Label>
-                <Select value={newSource.type} onValueChange={(v) => setNewSource({ ...newSource, type: v })}>
-                  <SelectTrigger className="mt-1.5 font-mono" data-testid="new-source-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-popover border border-border">
-                    <SelectItem value="auth">auth</SelectItem>
-                    <SelectItem value="web">web</SelectItem>
-                    <SelectItem value="os">os</SelectItem>
-                    <SelectItem value="network">network</SelectItem>
-                    <SelectItem value="db">db</SelectItem>
-                    <SelectItem value="api">api</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
-                  Description
-                </Label>
-                <Input
-                  data-testid="new-source-desc"
-                  value={newSource.description}
-                  onChange={(e) => setNewSource({ ...newSource, description: e.target.value })}
-                  placeholder="Optional"
-                  className="mt-1.5"
-                />
-              </div>
-            </div>
-            <Button type="submit" className="mt-4 font-mono text-xs uppercase tracking-widest" data-testid="new-source-submit">
-              Add source
-            </Button>
-          </form>
-
           <div className="border border-border/60 rounded-md bg-card/40 p-6" data-testid="sources-list">
             <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
               /// Registered sources
             </div>
+            <p className="text-[11px] font-mono text-muted-foreground mb-3 leading-relaxed">
+              Create and manage sources on the <a href="/sources" className="text-primary hover:underline">Log Sources</a> page.
+            </p>
             <div className="space-y-2">
               {sources.length === 0 && (
                 <div className="text-xs font-mono text-muted-foreground">No sources yet.</div>

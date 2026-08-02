@@ -223,19 +223,28 @@ async def list_sources(_: dict = Depends(current_user)):
 
 
 @api.post("/sources")
-async def create_source(body: SourceCreate, user: dict = Depends(current_user)):
-    import secrets
+async def create_source(body: SourceCreate, admin: dict = Depends(require_admin)):
+    import ingest_v1 as _v1
+    plaintext, hashed = _v1.generate_key()
     doc = {
         "id": str(uuid.uuid4()), "name": body.name, "type": body.type,
         "description": body.description or "", "last_event_at": None,
         "paused": False, "retention_hours": 72,
-        "ingest_api_key": secrets.token_urlsafe(24),
+        "ingest_api_key_hash": hashed,
+        "ingest_api_key_hint": plaintext[:12] + "…",
+        "key_created_at": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.log_sources.insert_one(doc)
+    try:
+        await db.log_sources.insert_one(doc)
+    except Exception as e:
+        # duplicate name (unique index)
+        raise HTTPException(status_code=409, detail=f"Source exists: {e}")
     doc.pop("_id", None)
-    await audit(user["email"], "create_source", target=body.name)
-    return doc
+    doc.pop("ingest_api_key_hash", None)
+    await audit(admin["email"], "create_source", target=body.name)
+    # Plaintext key is returned once. It is never retrievable again.
+    return {**doc, "ingest_api_key": plaintext}
 
 
 class SourceUpdate(BaseModel):
@@ -274,13 +283,49 @@ async def delete_source(name: str, purge_events: bool = False,
 
 @api.post("/sources/{name}/rotate-key")
 async def rotate_source_key(name: str, admin: dict = Depends(require_admin)):
-    import secrets
-    new_key = secrets.token_urlsafe(24)
-    r = await db.log_sources.update_one({"name": name}, {"$set": {"ingest_api_key": new_key}})
+    import ingest_v1 as _v1
+    plaintext, hashed = _v1.generate_key()
+    r = await db.log_sources.update_one(
+        {"name": name},
+        {"$set": {
+            "ingest_api_key_hash": hashed,
+            "ingest_api_key_hint": plaintext[:12] + "…",
+            "key_created_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
     if r.matched_count == 0:
         raise HTTPException(status_code=404, detail="Source not found")
+    # forget any rate-limit budget carried by the old key
     await audit(admin["email"], "rotate_source_key", target=name)
-    return {"ingest_api_key": new_key}
+    return {"ingest_api_key": plaintext}
+
+
+@api.post("/sources/{name}/revoke-key")
+async def revoke_source_key(name: str, admin: dict = Depends(require_admin)):
+    r = await db.log_sources.update_one(
+        {"name": name},
+        {"$unset": {"ingest_api_key_hash": "", "ingest_api_key_hint": ""},
+         "$set": {"key_revoked_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Source not found")
+    await audit(admin["email"], "revoke_source_key", target=name)
+    return {"ok": True}
+
+
+# -------------------- Public ingest URL --------------------
+@api.get("/ingest/config")
+async def ingest_config(_: dict = Depends(current_user)):
+    import ingest_v1 as _v1
+    base = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    return {
+        "endpoint": f"{base}/api/v1/ingest" if base else "/api/v1/ingest",
+        "rate_limit_per_min": _v1.RATE_LIMIT_PER_MIN,
+        "max_events_per_request": _v1.MAX_EVENTS_PER_REQ,
+        "max_body_bytes": _v1.MAX_BODY_BYTES,
+        "auth_header": "Authorization: Bearer sfk_...",
+        "alt_header": "X-Ingest-Key: sfk_...",
+    }
 
 
 # -------------------- Ingestion --------------------
@@ -824,4 +869,69 @@ async def shutdown():
     mongo.close()
 
 
+# -------------------- Push-only, key-auth ingestion (v1) --------------------
+# Mounted separately at /api/v1/*. This path ONLY accepts a scoped API key.
+# It does not read or write anything except raw_logs + normalized_events + alerts
+# via the same _ingest_events pipeline used everywhere else.
+from fastapi import Header, Request as _Req  # noqa: E402
+import ingest_v1 as _v1  # noqa: E402
+
+v1 = APIRouter(prefix="/api/v1")
+
+
+async def _auth_ingest_source(request: _Req) -> dict:
+    key = _v1.extract_key(request.headers)
+    if not key or not key.startswith(_v1.KEY_PREFIX):
+        raise HTTPException(status_code=401, detail="Missing or malformed ingest key")
+    key_hash = _v1.hash_key(key)
+    source = await db.log_sources.find_one({"ingest_api_key_hash": key_hash})
+    if not source:
+        raise HTTPException(status_code=401, detail="Invalid ingest key")
+    if source.get("paused"):
+        raise HTTPException(status_code=423, detail="Source is paused")
+    allowed, remaining, reset = _v1.check_rate(key_hash)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded ({_v1.RATE_LIMIT_PER_MIN}/min). Retry in {reset}s",
+            headers={"Retry-After": str(reset)},
+        )
+    source["_rate_remaining"] = remaining
+    source["_rate_reset"] = reset
+    return source
+
+
+@v1.get("/ping")
+async def v1_ping():
+    return {"ok": True, "service": "SentinelFlow", "ingest": "v1"}
+
+
+@v1.post("/ingest")
+async def v1_ingest(request: _Req, source: dict = Depends(_auth_ingest_source)):
+    raw = await request.body()
+    if len(raw) > _v1.MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+    try:
+        import json as _json
+        payload = _json.loads(raw or b"{}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    try:
+        events = _v1.validate_batch(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    result = await _ingest_events(events, source["name"], f"key:{source['name']}")
+    return {
+        **result,
+        "source": source["name"],
+        "rate_limit": {
+            "remaining": source.get("_rate_remaining"),
+            "reset_seconds": source.get("_rate_reset"),
+            "limit_per_min": _v1.RATE_LIMIT_PER_MIN,
+        },
+    }
+
+
 app.include_router(api)
+app.include_router(v1)
