@@ -43,6 +43,8 @@ export default function Alerts() {
   const [recommended, setRecommended] = useState([]);
   const [history, setHistory] = useState([]);
   const [targetOverride, setTargetOverride] = useState({}); // per-action
+  const [openIncidents, setOpenIncidents] = useState([]);
+  const [linkTarget, setLinkTarget] = useState("");
 
   const load = async () => {
     try {
@@ -67,21 +69,36 @@ export default function Alerts() {
 
   const openDetail = async (id) => {
     try {
-      const [{ data }, { data: rec }, { data: hist }] = await Promise.all([
+      const [{ data }, { data: rec }, { data: hist }, { data: incList }] = await Promise.all([
         api.get(`/alerts/${id}`),
         api.get(`/alerts/${id}/recommended-actions`),
         api.get(`/alerts/${id}/actions`),
+        api.get(`/incidents`),
       ]);
       setDetail(data);
       setNewStatus(data.status);
       setNote("");
       setRecommended(rec);
       setHistory(hist);
+      setOpenIncidents(incList.filter((i) => i.status !== "Closed"));
+      setLinkTarget("");
       const overrides = {};
       rec.forEach((r) => { overrides[r.type] = r.default_target || ""; });
       setTargetOverride(overrides);
     } catch {
       toast.error("Failed to load alert");
+    }
+  };
+
+  const linkToIncident = async () => {
+    if (!detail || !linkTarget) return;
+    try {
+      await api.post(`/incidents/${linkTarget}/alerts`, { alert_ids: [detail.id] });
+      toast.success("Alert linked to incident");
+      setLinkTarget("");
+      await openDetail(detail.id);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed");
     }
   };
 
@@ -283,6 +300,54 @@ export default function Alerts() {
                   </div>
                 </div>
               )}
+
+              {/* Link to existing incident */}
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+                  Link to existing incident
+                </div>
+                {(detail.linked_incidents || []).length > 0 && (
+                  <div className="mb-2 space-y-1" data-testid="linked-incidents">
+                    {detail.linked_incidents.map((i) => (
+                      <div key={i.id} className="text-[11px] font-mono border border-primary/25 bg-primary/5 rounded-sm px-2 py-1.5 flex items-center gap-2">
+                        <GitBranch className="w-3 h-3 text-primary" />
+                        <span className="text-primary">{i.status}</span>
+                        <span className="text-muted-foreground">·</span>
+                        <a href={`/incidents`} className="hover:underline">{i.title}</a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {openIncidents.length === 0 ? (
+                  <div className="text-[11px] font-mono text-muted-foreground">
+                    No open incidents. Use "Escalate to incident" above to open one.
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Select value={linkTarget} onValueChange={setLinkTarget}>
+                      <SelectTrigger className="flex-1 font-mono text-xs" data-testid="link-incident-select">
+                        <SelectValue placeholder="Choose an incident…" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover border border-border">
+                        {openIncidents.map((i) => (
+                          <SelectItem key={i.id} value={i.id}>
+                            {i.status} · {i.title.slice(0, 60)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      onClick={linkToIncident}
+                      disabled={!linkTarget}
+                      data-testid="link-incident-btn"
+                      className="font-mono text-[10px] uppercase tracking-widest"
+                    >
+                      Link
+                    </Button>
+                  </div>
+                )}
+              </div>
 
               {/* Evidence */}
               <div>

@@ -206,7 +206,13 @@ async def _do_escalate_incident(db, alert: dict, approver: dict, note: str) -> d
         "alert_ids": [alert["id"]],
         "evidence_event_ids": alert.get("evidence_event_ids") or [],
         "summary": alert["explanation"],
+        "root_cause": "",
         "notes": [{"at": _now(), "by": approver["email"], "text": note or "Escalated from alert."}],
+        "timeline": [{
+            "at": _now(), "kind": "opened", "by": approver["email"],
+            "text": f"Incident escalated from alert {alert['id'][:8]} · {alert['rule_id']}.",
+            "meta": {"alert_id": alert["id"], "rule_id": alert["rule_id"]},
+        }],
     }
     await db.incidents.insert_one(dict(incident))
     return await _record(db, alert["id"], "escalate_incident", incident["id"],

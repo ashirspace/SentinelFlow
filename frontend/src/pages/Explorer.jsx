@@ -7,7 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import api, { API_BASE } from "@/lib/api";
 import { toast } from "sonner";
-import { Search, Download, Check, Tag as TagIcon } from "lucide-react";
+import { Search, Download, Check, Tag as TagIcon, Bookmark, X as XIcon } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 export default function Explorer() {
   const [events, setEvents] = useState([]);
@@ -19,6 +21,9 @@ export default function Explorer() {
   const [selected, setSelected] = useState(null);
   const [tagInput, setTagInput] = useState("");
   const [noteInput, setNoteInput] = useState("");
+  const [savedSearches, setSavedSearches] = useState([]);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -36,6 +41,48 @@ export default function Explorer() {
       setLoading(false);
     }
   };
+
+  const loadSaved = async () => {
+    try {
+      const { data } = await api.get("/saved-searches");
+      setSavedSearches(data);
+    } catch { /* ignore */ }
+  };
+
+  const applySaved = (s) => {
+    const f = s.filters || {};
+    setQ(f.q || "");
+    setSeverity(f.severity || "all");
+    setAppName(f.app_name || "all");
+    toast.success(`Applied "${s.name}"`);
+  };
+
+  const saveCurrent = async (e) => {
+    e.preventDefault();
+    if (!saveName.trim()) return;
+    const filters = {};
+    if (q) filters.q = q;
+    if (severity !== "all") filters.severity = severity;
+    if (appName !== "all") filters.app_name = appName;
+    try {
+      await api.post("/saved-searches", { name: saveName.trim(), filters });
+      toast.success("Search saved");
+      setSaveOpen(false);
+      setSaveName("");
+      await loadSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Save failed");
+    }
+  };
+
+  const deleteSaved = async (id) => {
+    try {
+      await api.delete(`/saved-searches/${id}`);
+      await loadSaved();
+    } catch (err) { toast.error("Delete failed"); }
+  };
+
+  useEffect(() => { loadSaved(); }, []);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [severity, appName]);
 
@@ -152,7 +199,51 @@ export default function Explorer() {
           <Download className="w-3.5 h-3.5 mr-1.5" />
           Export CSV
         </Button>
+        <Button
+          onClick={() => setSaveOpen(true)}
+          variant="outline"
+          data-testid="save-search-btn"
+          className="font-mono text-xs uppercase tracking-widest"
+        >
+          <Bookmark className="w-3.5 h-3.5 mr-1.5" />
+          Save search
+        </Button>
       </div>
+
+      {/* Saved searches strip */}
+      {savedSearches.length > 0 && (
+        <div className="px-8 mb-4 flex items-center gap-2 flex-wrap" data-testid="saved-searches">
+          <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+            Saved:
+          </span>
+          {savedSearches.map((s) => (
+            <div
+              key={s.id}
+              data-testid={`saved-search-${s.id}`}
+              className="inline-flex items-center gap-1 border border-border/60 rounded-sm bg-card/40 pl-2 pr-1 py-1 text-xs font-mono hover:bg-white/5"
+              style={{ transition: "background-color 0.15s ease" }}
+            >
+              <button
+                onClick={() => applySaved(s)}
+                className="text-cyan-300 hover:text-cyan-200"
+                title={JSON.stringify(s.filters)}
+                data-testid={`saved-search-apply-${s.id}`}
+              >
+                {s.name}
+              </button>
+              <button
+                onClick={() => deleteSaved(s.id)}
+                className="ml-1 text-muted-foreground hover:text-red-400 p-0.5"
+                title="Delete saved search"
+                data-testid={`saved-search-delete-${s.id}`}
+                style={{ transition: "color 0.15s ease" }}
+              >
+                <XIcon className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Table */}
       <div className="px-8">
@@ -314,6 +405,48 @@ export default function Explorer() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Save search dialog */}
+      <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+        <DialogContent className="bg-card border border-border/60" data-testid="save-search-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-sm uppercase tracking-widest text-muted-foreground">
+              Save current search
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={saveCurrent} className="space-y-3">
+            <div>
+              <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Name</Label>
+              <Input
+                data-testid="save-search-name"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                placeholder="e.g. Suspicious auth events"
+                className="mt-1.5 font-mono"
+                required
+              />
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
+                Filters to save
+              </div>
+              <div className="text-[11px] font-mono border border-border/60 rounded-sm p-2 bg-black/30 space-y-0.5">
+                <div>q: <span className="text-cyan-300">{q || "—"}</span></div>
+                <div>severity: <span className="text-cyan-300">{severity}</span></div>
+                <div>app_name: <span className="text-cyan-300">{appName}</span></div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setSaveOpen(false)} className="font-mono text-xs uppercase tracking-widest">
+                Cancel
+              </Button>
+              <Button type="submit" data-testid="save-search-submit" className="font-mono text-xs uppercase tracking-widest">
+                Save search
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

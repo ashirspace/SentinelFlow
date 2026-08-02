@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 5 backend + frontend tested. Backend: 17/17 pytest pass (test_iteration5.py) — incident create/get/patch (status/root_cause/note/title), timeline entries, evidence aggregation/dedup, link/unlink alerts (with 400 for unknown, 404 for not-linked), status validation (422 on Bogus), legacy incident backfills, alert.linked_incidents populated, alert lifecycle unchanged (New/Under Review/Investigating/Confirmed/False Positive/Resolved), 10 rules R001-R010 unchanged, saved-searches per-user CRUD + 409 on dup + 404 on cross-user delete, audit rows for create_incident/update_incident/link_alerts/unlink_alert with actor=admin. Frontend UI verified: incidents list, incident drawer (status-select w/ all 4 statuses including Resolved, root-cause save, note save, timeline block reverse-chrono, alerts block w/ unlink), alerts drawer link-incident-select/btn + linked-incidents block populates after linking (toast 'Alert linked to incident' seen), Explorer save-search dialog + saved-searches strip + chip apply/delete all present. Two frontend gaps found on Incidents page: (1) NO 'New incident' button (data-testid='new-incident-btn') is rendered — the `newOpen` state and new-incident dialog exist in code but there's no visible trigger, so the create-incident flow is unreachable from the Incidents page UI. (2) NO status filter control (data-testid='incident-status-filter') rendered even though `statusFilter` state exists.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Incidents.jsx", "issue": "The 'New incident' button (data-testid='new-incident-btn') required by the spec is NOT rendered. `newOpen` state + full new-incident-dialog exist in JSX (lines 302-354) but there is no button/PageHeader-right slot that calls setNewOpen(true). Users can only create incidents by escalating from an alert. Add a Button in the page header (e.g., <PageHeader right={<Button data-testid='new-incident-btn' onClick={()=>setNewOpen(true)}>New incident</Button>} />).", "selector": "[data-testid='new-incident-btn']", "priority": "HIGH"},
+      {"component": "Incidents.jsx", "issue": "Status filter is unusable — `statusFilter` state (line 35) is declared and its value is used to build /incidents?status= query, but no <Select data-testid='incident-status-filter'> is rendered. Users cannot filter incidents by status via the UI.", "selector": "[data-testid='incident-status-filter']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "All Radix dialogs (from iter4)", "issues": ["Missing DialogDescription/aria-describedby warnings persist (a11y). Non-blocking."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5.py",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "action_items": [
+    "Incidents.jsx: render a 'New incident' button with data-testid='new-incident-btn' that calls setNewOpen(true) (e.g., in PageHeader right slot).",
+    "Incidents.jsx: render a status filter Select with data-testid='incident-status-filter' (options: all/Open/Investigating/Resolved/Closed) bound to statusFilter."
+  ],
+  "critical_code_review_comments": [
+    "Incidents.jsx has orphaned state — `newOpen`/`setNewOpen` and `statusFilter`/`setStatusFilter` are declared but no UI element ever toggles them. Confirms this was an incomplete render, not intentional API-only.",
+    "server.py update_incident: the `if len(updates) == 1 and not push_notes and not timeline_entries` guard (line 730) correctly rejects empty PATCH but is fragile — relies on updated_at being the only key. Consider tracking a real 'anything_changed' flag.",
+    "server.py get_incident backfills root_cause+timeline in the response only (line 625-626) — the underlying document is not persisted. This is fine for reads but any subsequent PATCH that references timeline[-1] would still see missing field on the doc. In practice the code uses $push which auto-creates arrays, so OK.",
+    "server.py create_incident evidence dedup uses `list(dict.fromkeys(...))` (line 669) — good. link_alerts uses $addToSet which also dedups. Consistent.",
+    "server.py list_incidents returns full docs including notes/timeline arrays — for large incidents this could be heavy. Consider excluding notes/timeline from list and only including on detail GET.",
+    "server.py saved_searches unique index is on (owner, name) — correct. But POST returns 409 with a generic message; would be nicer to say which name already exists.",
+    "Explorer.jsx applySaved sets q/severity/appName then relies on the `[severity, appName]` useEffect to reload — good. But saved.filters may omit `q` and then setQ('') resets — expected."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5.py",
+    "/app/test_reports/iteration_5.json",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "80% (drawer, alerts-link, explorer saved-searches all work; new-incident-btn and incident-status-filter missing)"},
+  "test_credentials": "Admin: admin@sentinelflow.io / Admin@12345; Analyst: analyst@sentinelflow.io / Analyst@123",
+  "seed_data_creation": "Created and updated 'TEST_iter5 case A' → renamed to 'TEST_iter5 renamed' incident (status=Resolved, root_cause='Compromised creds', notes=['Reviewed logs'], with linked alerts and evidence). Created + deleted 'TEST_iter5_ss_*' saved search under admin. UI test also linked one alert to an incident. Not cleaned up — safe residue.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration5.py is self-contained and stashes incident id on pytest module for cross-test reuse. Uses seed data (invokes /api/ingest/seed if <2 alerts). To rerun, safe. Only two UI gaps remain: missing new-incident-btn and incident-status-filter on Incidents page — both are pure render additions in Incidents.jsx.",
+  "rca of the issue": "Missing new-incident-btn: developer added the dialog + form + state (newOpen, newForm, createIncident) in Incidents.jsx but forgot to wire a trigger button. Reproduction: navigate to /incidents as admin — no visible 'New incident' CTA, and querySelector('[data-testid=new-incident-btn]') returns null. Same pattern for status filter. Mitigation: add a Button in PageHeader's right prop that calls setNewOpen(true), and add a Select bound to statusFilter next to the incident list header."
+}
