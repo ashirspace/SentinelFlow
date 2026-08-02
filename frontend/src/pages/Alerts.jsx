@@ -6,9 +6,30 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { ShieldOff, UserX, LogOut, GitBranch, ShieldCheck } from "lucide-react";
 
 const STATUSES = ["New", "Under Review", "Investigating", "Confirmed", "False Positive", "Resolved"];
+
+const ACTION_LABEL = {
+  block_ip: "Block IP",
+  disable_account: "Disable account",
+  revoke_session: "Revoke session",
+  escalate_incident: "Escalate to incident",
+};
+const ACTION_ICON = {
+  block_ip: ShieldOff,
+  disable_account: UserX,
+  revoke_session: LogOut,
+  escalate_incident: GitBranch,
+};
+const ACTION_HINT = {
+  block_ip: "Adds the source IP to SentinelFlow's internal blocklist. Future events from this IP will auto-flag under R010.",
+  disable_account: "Sets disabled=true on SentinelFlow-managed accounts. For external accounts, records a clear recommendation instead — SentinelFlow cannot reach into another system's user table.",
+  revoke_session: "Bumps the account's token_version, invalidating any JWTs SentinelFlow issued. External accounts: records a recommendation.",
+  escalate_incident: "Opens a new incident pre-filled with this alert's evidence and links this alert to it.",
+};
 
 export default function Alerts() {
   const [params, setParams] = useSearchParams();
@@ -19,6 +40,9 @@ export default function Alerts() {
   const [newStatus, setNewStatus] = useState("");
   const [note, setNote] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [recommended, setRecommended] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [targetOverride, setTargetOverride] = useState({}); // per-action
 
   const load = async () => {
     try {
@@ -43,12 +67,42 @@ export default function Alerts() {
 
   const openDetail = async (id) => {
     try {
-      const { data } = await api.get(`/alerts/${id}`);
+      const [{ data }, { data: rec }, { data: hist }] = await Promise.all([
+        api.get(`/alerts/${id}`),
+        api.get(`/alerts/${id}/recommended-actions`),
+        api.get(`/alerts/${id}/actions`),
+      ]);
       setDetail(data);
       setNewStatus(data.status);
       setNote("");
+      setRecommended(rec);
+      setHistory(hist);
+      const overrides = {};
+      rec.forEach((r) => { overrides[r.type] = r.default_target || ""; });
+      setTargetOverride(overrides);
     } catch {
       toast.error("Failed to load alert");
+    }
+  };
+
+  const approve = async (action_type) => {
+    if (!detail) return;
+    try {
+      const res = await api.post(`/alerts/${detail.id}/approve`, {
+        action_type,
+        target: targetOverride[action_type] || undefined,
+        note,
+      });
+      const r = res.data;
+      const label = ACTION_LABEL[action_type] || action_type;
+      const detailMsg = r.result === "recommended_external"
+        ? `${label}: manual recommendation recorded`
+        : `${label}: ${r.result.replace(/_/g, " ")}`;
+      toast.success(detailMsg);
+      setNote("");
+      await openDetail(detail.id);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Action failed");
     }
   };
 
@@ -164,6 +218,71 @@ export default function Alerts() {
                   {detail.recommended_action}
                 </div>
               </div>
+
+              {/* Response actions (human-approved) */}
+              {recommended.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+                    Response actions
+                  </div>
+                  <div className="space-y-2" data-testid="response-actions">
+                    {recommended.map((r) => {
+                      const Icon = ACTION_ICON[r.type];
+                      return (
+                        <div key={r.type} className="border border-border/60 rounded-sm p-3 space-y-2" data-testid={`action-${r.type}`}>
+                          <div className="flex items-center gap-2">
+                            <Icon className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-sm font-medium">{ACTION_LABEL[r.type]}</span>
+                          </div>
+                          <div className="text-[11px] text-muted-foreground leading-relaxed">
+                            {ACTION_HINT[r.type]}
+                          </div>
+                          {(r.type === "block_ip" || r.type === "disable_account" || r.type === "revoke_session") && (
+                            <Input
+                              value={targetOverride[r.type] || ""}
+                              onChange={(e) => setTargetOverride({ ...targetOverride, [r.type]: e.target.value })}
+                              placeholder={r.type === "block_ip" ? "IP address" : "Account (email or username)"}
+                              className="font-mono text-xs h-8"
+                              data-testid={`target-${r.type}`}
+                            />
+                          )}
+                          <Button
+                            onClick={() => approve(r.type)}
+                            size="sm"
+                            className="w-full font-mono text-[11px] uppercase tracking-widest"
+                            data-testid={`approve-${r.type}`}
+                          >
+                            <ShieldCheck className="w-3 h-3 mr-1.5" />
+                            Approve {ACTION_LABEL[r.type]}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Executed actions history */}
+              {history.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+                    Approvals · {history.length}
+                  </div>
+                  <div className="space-y-1.5" data-testid="approval-history">
+                    {history.map((h) => (
+                      <div key={h.id} className="text-[11px] font-mono border border-emerald-500/25 bg-emerald-500/5 rounded-sm px-2 py-1.5">
+                        <span className="text-emerald-400 uppercase tracking-widest">{h.result.replace(/_/g, " ")}</span>
+                        {" · "}
+                        <span className="text-cyan-300">{h.approver}</span>
+                        {" · "}
+                        <span>{ACTION_LABEL[h.action_type] || h.action_type}</span>
+                        {h.target && <span className="text-muted-foreground"> → {h.target}</span>}
+                        <div className="text-muted-foreground">{new Date(h.created_at).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Evidence */}
               <div>

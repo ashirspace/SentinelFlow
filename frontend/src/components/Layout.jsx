@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   ShieldAlert, LayoutDashboard, Search, Bell, Upload, Radar,
-  Users, FileText, LogOut, Circle,
+  Users, FileText, LogOut, Circle, AlertTriangle, HardDrive,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Toaster } from "sonner";
@@ -9,7 +9,9 @@ import { Toaster } from "sonner";
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
   { to: "/alerts", label: "Alerts", icon: Bell, testid: "nav-alerts" },
+  { to: "/incidents", label: "Incidents", icon: AlertTriangle, testid: "nav-incidents" },
   { to: "/explorer", label: "Log Explorer", icon: Search, testid: "nav-explorer" },
+  { to: "/sources", label: "Log Sources", icon: HardDrive, testid: "nav-sources" },
   { to: "/ingest", label: "Ingestion", icon: Upload, testid: "nav-ingest" },
   { to: "/rules", label: "Detection Rules", icon: Radar, testid: "nav-rules" },
 ];

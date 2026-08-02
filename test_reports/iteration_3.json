@@ -1,0 +1,54 @@
+{
+  "summary": "Iteration 3 SentinelFlow full-stack testing. Backend: 27/27 new pytest tests passed in /app/backend/tests/test_iteration3.py covering R010 blocklist rule, recommended-actions, all 4 approve executors (block_ip, disable_account internal+external, revoke_session, escalate_incident with dedup), audit trail, IP blocklist RBAC, sources health/patch/pause/rotate/delete, event annotations, CSV export, retention (raw_logs expires_at). Also updated /app/backend/tests/backend_test.py test_rules_nine → 10 rules to fix the iteration-2 regression that expected 9. Regression suite still green (33/33). Frontend: nav-sources, nav-incidents, alert response-actions, action-<type>, approve-<type> and approval-history flow all working (verified escalate_incident approve + history update). Sources table renders with pause/retention/rotate/delete per-row testids, retention dialog opens. Incidents page renders items and opens incident-drawer. CRITICAL: Explorer page crashes on mount with 'ReferenceError: exportCsv is not defined' (Explorer.jsx:95) — the onClick handler references an undeclared function. This blocks CSV export UI, event annotations UI, and any Log Explorer usage on the frontend. Backend CSV export + PATCH /events endpoints themselves work correctly (verified via pytest).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/sources/{name}", "issue": "retention_hours=100 correctly rejected (422). No issue — noted for context."},
+      {"endpoint": "GET /api/sources", "issue": "retention_hours defaults to 72 for legacy demo docs on the fly, but only in the response — the underlying document may not have the field until first PATCH. Not user-visible."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Explorer.jsx", "issue": "onClick={exportCsv} at line 95 references an undefined function → uncaught ReferenceError crashes the whole Explorer route (red error overlay in dev, blank in prod). Need to define exportCsv (open `${API_BASE}/export/events.csv?...` in a new tab with current filter params) before the page can render.", "selector": "[data-testid='export-csv-btn']", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [
+      {"flow": "Explorer → Event annotations", "issue": "Not testable end-to-end from UI because Explorer crashes on mount. Backend PATCH /api/events/{id} and GET /api/events/{id} verified via pytest.", "affected_selectors": ["[data-testid='event-drawer']", "[data-testid='event-tags-save']", "[data-testid='event-note-save']", "[data-testid='event-reviewed-toggle']"]}
+    ],
+    "design_issues": [
+      {"screen": "Dashboard (first paint)", "issues": ["Recharts still emits width/height=-1 warnings on initial mount — carried from iter1/iter2, cosmetic."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [
+    "FIX Explorer.jsx: define exportCsv() — e.g. `const exportCsv = () => { const p = new URLSearchParams(); if (q) p.set('q',q); if (severity!=='all') p.set('severity',severity); if (appName!=='all') p.set('app_name',appName); window.open(`${API_BASE}/export/events.csv?${p.toString()}`, '_blank'); };`. Without this, the entire /explorer route is broken.",
+    "OPTIONAL: consider making /api/export/events.csv use cookie auth transparently in the new tab — currently works because cookies are HttpOnly + SameSite=None + Secure and are sent on new-tab GET. Verified via curl-with-cookies in pytest.",
+    "OPTIONAL (carried from iter2): server.py still uses deprecated @app.on_event; login_attempts lockout keyed by (ip,email) can be evaded by multi-pod ingress."
+  ],
+  "critical_code_review_comments": [
+    "Explorer.jsx — CRITICAL: references exportCsv without defining it. React renders the page fine only until the JSX is evaluated for the button's onClick prop assignment (React reads the identifier at render time only in strict scope) — in fact this fails immediately because JSX evaluates {exportCsv} as an expression during render. Result: entire route unusable.",
+    "responses.py — approve_action returns a dict via _record which still contains `_id` from insert_one's mutation? No — _record does `doc.pop('_id', None)` after insert. Good.",
+    "responses.py _do_disable_account and _do_revoke_session lookup users by {email: account.lower()} OR {name: account}. The `name` match is exact-cased (SentinelFlow Admin). Fine.",
+    "responses.py _do_escalate_incident uses `db.incidents.find_one({'alert_ids': alert['id']})` — this matches when alert_ids array contains the id. Correct.",
+    "server.py delete_source with purge_events=true removes normalized_events + raw_logs but does NOT delete related alerts or response_actions — arguably intended (analyst history), worth calling out.",
+    "server.py PATCH /events accepts reviewed=false but only sets reviewed_by/reviewed_at when reviewed=true — reviewed_by/reviewed_at are never cleared on un-review. Minor.",
+    "rules.py R010 detect_blocklisted seen_ips guard prevents duplicate alerts for the same IP in a single batch — good. But it will NOT dedup across batches, so hammering the same blocked IP every ingest run produces N alerts. Consider a `last_alerted_at` on the blocklist entry.",
+    "auth.py token_version enforced against user.token_version — correct. login endpoint also stamps tv into the freshly issued JWT so a user who was just revoked can log back in normally. Good.",
+    "server.py login lockout still checks `datetime.fromisoformat(attempt['locked_until'])` which assumes ISO with tz — the write path uses `.isoformat()` on tz-aware datetime, OK."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration3.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": {"backend": "100% (27/27 iteration-3 + 33/33 regression)", "frontend": "80% — Alerts response-actions, Sources actions, Incidents drawer, navigation all pass; Explorer route crashes preventing CSV/annotations UI verification"},
+  "test_credentials": "Admin: admin@sentinelflow.io / Admin@12345; Analyst: analyst@sentinelflow.io / Analyst@123",
+  "seed_data_creation": "Called POST /api/ingest/seed at module start. Created several temp users (test_disable_*, test_revoke_*) and deleted them at end of each test. Some incident + response_action + audit rows persist for the seeded alerts as expected. Blocklist entries added and cleaned up.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration3.py mutates: creates+deletes temp users, blocks then unblocks 203.0.113.77 / 203.0.113.99, patches auth-server-01 retention → 24h, rotates auth-server-01 ingest_api_key, escalates R001 alerts (accumulates incidents on repeated runs — dedup covers it), and pushes new note 'iter3-triage' to the first alert. Safe to rerun. The ONE frontend bug (exportCsv undefined) blocks Explorer completely; after fix, retry the last three data-testids listed in frontend_issues.integration_issues.affected_selectors.",
+  "rca of the issue": "Explorer.jsx line 95: `onClick={exportCsv}` — no `const exportCsv = ...` anywhere in the file. The React component throws ReferenceError during render evaluation of the JSX expression. Root cause: incomplete implementation of iteration 3 CSV export UI wiring. Backend endpoint /api/export/events.csv is fully functional (verified in pytest test_export_csv_content_type_and_header). Mitigation: define the function to build filter query string and open `${API_BASE}/export/events.csv?<params>` in a new tab (window.open with '_blank'). Backend uses cookie auth so the browser will send credentials automatically."
+}

@@ -258,9 +258,9 @@ def test_rules_nine(admin_session):
     r = admin_session.get(f"{API}/rules", timeout=15)
     assert r.status_code == 200
     rules = r.json()
-    assert len(rules) == 9, f"expected 9 rules, got {len(rules)}"
+    assert len(rules) == 10, f"expected 10 rules, got {len(rules)}"
     ids = {r["rule_id"] for r in rules}
-    for rid in ["R001", "R002", "R003", "R004", "R005", "R006", "R007", "R008", "R009"]:
+    for rid in ["R001", "R002", "R003", "R004", "R005", "R006", "R007", "R008", "R009", "R010"]:
         assert rid in ids
     sev_by_id = {r["rule_id"]: r["severity"] for r in rules}
     assert sev_by_id["R007"] == "Suspicious"

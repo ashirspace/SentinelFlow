@@ -6,7 +6,7 @@ Every rule returns a list of alerts. Every alert cites raw evidence
 import re
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 
 # Static blocklist of "known malicious" IPs for MVP
@@ -104,6 +104,15 @@ RULES_META = [
         "severity": "Suspicious",
         "template": "Admin user {user} logged in from a new device fingerprint {src_ip} · {user_agent} at {when} — verify the login was expected.",
     },
+    {
+        "rule_id": "R010",
+        "name": "Blocklisted IP (analyst-approved)",
+        "condition": "Source IP appears on the internal blocklist maintained by analyst-approved actions",
+        "threshold": 1,
+        "window_minutes": 0,
+        "severity": "Likely malicious",
+        "template": "Traffic observed from {src_ip} which is on the internal blocklist (approved by {approver} for {reason}) — repeat attempt at {when}.",
+    },
 ]
 
 
@@ -137,6 +146,7 @@ def _recommended_action(rule_id: str) -> str:
         "R007": "Apply WAF rate-limit rule for this IP after human review. Check for scraping or abuse.",
         "R008": "Block the request pattern at the WAF (human-approved). Audit vulnerable endpoint code.",
         "R009": "Contact the admin user out-of-band. Force MFA re-enrollment if login not recognized.",
+        "R010": "Escalate to incident. This IP was previously blocked by an analyst — the blocklist is holding, verify no bypass.",
     }[rule_id]
 
 
@@ -314,9 +324,11 @@ async def detect_silent_sources(db) -> List[Dict[str, Any]]:
     return alerts
 
 
-def run_all_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Run all synchronous rules (R001–R005, R007, R008) over a batch of events."""
-    return (
+def run_all_rules(events: List[Dict[str, Any]],
+                  blocklist: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """Run all synchronous rules (R001–R005, R007, R008, R010) over a batch of events.
+    `blocklist` maps ip -> {reason, approver, ...} for R010."""
+    alerts = (
         detect_brute_force(events)
         + detect_success_after_fail(events)
         + detect_off_hours_or_unusual_country(events)
@@ -325,6 +337,33 @@ def run_all_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         + detect_rate_anomaly(events)
         + detect_injection_patterns(events)
     )
+    if blocklist:
+        alerts += detect_blocklisted(events, blocklist)
+    return alerts
+
+
+def detect_blocklisted(events: List[Dict[str, Any]],
+                       blocklist: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rule = _get("R010")
+    alerts = []
+    seen_ips = set()  # one alert per (ip, batch)
+    for e in events:
+        ip = e.get("src_ip")
+        if not ip or ip not in blocklist or ip in seen_ips:
+            continue
+        seen_ips.add(ip)
+        info = blocklist[ip]
+        explanation = rule["template"].format(
+            src_ip=ip,
+            approver=info.get("created_by", "an analyst"),
+            reason=info.get("reason", "prior alert"),
+            when=e["timestamp"],
+        )
+        alerts.append(_new_alert(
+            rule, explanation, [e["event_id"]], rule["severity"],
+            {"src_ip": ip, "block_reason": info.get("reason")},
+        ))
+    return alerts
 
 
 # -------------------- R007: Rate anomaly --------------------

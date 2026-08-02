@@ -9,6 +9,8 @@ import Alerts from "@/pages/Alerts";
 import Explorer from "@/pages/Explorer";
 import Ingest from "@/pages/Ingest";
 import Rules from "@/pages/Rules";
+import Sources from "@/pages/Sources";
+import Incidents from "@/pages/Incidents";
 import Users from "@/pages/Users";
 import Audit from "@/pages/Audit";
 
@@ -32,6 +34,8 @@ export default function App() {
           <Route path="/explorer" element={<Shell><Explorer /></Shell>} />
           <Route path="/ingest" element={<Shell><Ingest /></Shell>} />
           <Route path="/rules" element={<Shell><Rules /></Shell>} />
+          <Route path="/sources" element={<Shell><Sources /></Shell>} />
+          <Route path="/incidents" element={<Shell><Incidents /></Shell>} />
           <Route path="/users" element={<Shell requireAdmin><Users /></Shell>} />
           <Route path="/audit" element={<Shell requireAdmin><Audit /></Shell>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

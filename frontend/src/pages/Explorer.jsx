@@ -4,9 +4,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import api from "@/lib/api";
+import { Textarea } from "@/components/ui/textarea";
+import api, { API_BASE } from "@/lib/api";
 import { toast } from "sonner";
-import { Search } from "lucide-react";
+import { Search, Download, Check, Tag as TagIcon } from "lucide-react";
 
 export default function Explorer() {
   const [events, setEvents] = useState([]);
@@ -16,6 +17,8 @@ export default function Explorer() {
   const [severity, setSeverity] = useState("all");
   const [appName, setAppName] = useState("all");
   const [selected, setSelected] = useState(null);
+  const [tagInput, setTagInput] = useState("");
+  const [noteInput, setNoteInput] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -88,6 +91,15 @@ export default function Explorer() {
         <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest ml-auto" data-testid="events-count">
           {loading ? "loading…" : `${events.length} / ${total} events`}
         </div>
+        <Button
+          onClick={exportCsv}
+          variant="outline"
+          data-testid="export-csv-btn"
+          className="font-mono text-xs uppercase tracking-widest"
+        >
+          <Download className="w-3.5 h-3.5 mr-1.5" />
+          Export CSV
+        </Button>
       </div>
 
       {/* Table */}
@@ -111,7 +123,7 @@ export default function Explorer() {
                 {events.map((e) => (
                   <tr
                     key={e.event_id}
-                    onClick={() => setSelected(e)}
+                    onClick={() => openRow(e)}
                     data-testid={`event-row-${e.event_id}`}
                     className="hover-row border-b border-border/40 cursor-pointer"
                   >
@@ -123,11 +135,24 @@ export default function Explorer() {
                     <Td>{e.action || "—"}</Td>
                     <Td>{e.host || "—"}</Td>
                     <Td>{e.http_status ?? "—"}</Td>
+                    <Td>
+                      {e.reviewed && (
+                        <span className="inline-flex items-center gap-1 text-emerald-400" title={`Reviewed by ${e.reviewed_by || "?"}`}>
+                          <Check className="w-3 h-3" />
+                        </span>
+                      )}
+                      {(e.tags || []).length > 0 && (
+                        <span className="inline-flex items-center gap-1 text-cyan-300 ml-2" title={(e.tags || []).join(", ")}>
+                          <TagIcon className="w-3 h-3" />
+                          {e.tags.length}
+                        </span>
+                      )}
+                    </Td>
                   </tr>
                 ))}
                 {events.length === 0 && !loading && (
                   <tr>
-                    <td colSpan="8" className="text-center text-muted-foreground py-12 font-mono text-xs">
+                    <td colSpan="9" className="text-center text-muted-foreground py-12 font-mono text-xs">
                       No events found. Try adjusting filters or ingesting data.
                     </td>
                   </tr>
@@ -166,6 +191,67 @@ export default function Explorer() {
                 <Field label="HTTP Status" value={selected.http_status} mono />
                 <Field label="Country" value={selected.country} mono />
               </div>
+
+              {/* Annotations */}
+              <div className="border-t border-border/60 pt-4 space-y-3" data-testid="event-annotations">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                    Analyst annotations
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={selected.reviewed ? "default" : "outline"}
+                    onClick={toggleReviewed}
+                    data-testid="event-reviewed-toggle"
+                    className="font-mono text-[10px] uppercase tracking-widest"
+                  >
+                    <Check className="w-3 h-3 mr-1" />
+                    {selected.reviewed ? "Reviewed" : "Mark reviewed"}
+                  </Button>
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                    Tags (comma-separated)
+                  </label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Input
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      placeholder="e.g. tor, scraping, low-priority"
+                      className="font-mono text-xs h-8"
+                      data-testid="event-tags-input"
+                    />
+                    <Button size="sm" onClick={saveTags} data-testid="event-tags-save" className="font-mono text-[10px] uppercase tracking-widest">
+                      Save
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                    Add note
+                  </label>
+                  <Textarea
+                    value={noteInput}
+                    onChange={(e) => setNoteInput(e.target.value)}
+                    placeholder="What did you find?"
+                    className="mt-1 font-mono text-xs"
+                    data-testid="event-note-input"
+                  />
+                  <Button size="sm" onClick={addNote} disabled={!noteInput.trim()} data-testid="event-note-save" className="mt-1 font-mono text-[10px] uppercase tracking-widest">
+                    Add note
+                  </Button>
+                </div>
+                {(selected.notes || []).length > 0 && (
+                  <div className="space-y-1">
+                    {selected.notes.map((n, i) => (
+                      <div key={i} className="text-[11px] font-mono border border-border/50 rounded-sm px-2 py-1.5">
+                        <span className="text-muted-foreground">{new Date(n.at).toLocaleString()}</span> — <span className="text-cyan-300">{n.by}</span> — {n.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
                   Raw log

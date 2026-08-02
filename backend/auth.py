@@ -28,20 +28,22 @@ def _secret() -> str:
     return os.environ["JWT_SECRET"]
 
 
-def create_access_token(user_id: str, email: str, role: str) -> str:
+def create_access_token(user_id: str, email: str, role: str, token_version: int = 0) -> str:
     payload = {
         "sub": user_id,
         "email": email,
         "role": role,
+        "tv": token_version,
         "type": "access",
         "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TTL_MIN),
     }
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
 
-def create_refresh_token(user_id: str) -> str:
+def create_refresh_token(user_id: str, token_version: int = 0) -> str:
     payload = {
         "sub": user_id,
+        "tv": token_version,
         "type": "refresh",
         "exp": datetime.now(timezone.utc) + timedelta(days=REFRESH_TTL_DAYS),
     }
@@ -84,6 +86,10 @@ async def get_current_user(request: Request, db) -> dict:
         user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+        if user.get("disabled"):
+            raise HTTPException(status_code=401, detail="Account disabled")
+        if int(payload.get("tv", 0)) != int(user.get("token_version", 0)):
+            raise HTTPException(status_code=401, detail="Session revoked")
         user["id"] = str(user.pop("_id"))
         user.pop("password_hash", None)
         return user

@@ -7,7 +7,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from bson import ObjectId
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, UploadFile, File, Query
@@ -23,6 +23,7 @@ from normalize import normalize_record, parse_upload
 from rules import run_all_rules, detect_silent_sources, detect_new_device_admin, RULES_META
 from seed import sample_events, demo_sources
 from notifier import notify_alerts, is_enabled as email_enabled
+from responses import approve_action, RECOMMENDED_BY_RULE, ACTION_LABELS
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -125,17 +126,19 @@ async def login(body: LoginBody, request: Request, response: Response):
         fails = (attempt or {}).get("fails", 0) + 1
         update = {"identifier": identifier, "fails": fails, "last_at": now.isoformat()}
         if fails >= 5:
-            update["locked_until"] = (now.replace(microsecond=0)
-                                      .isoformat().replace("+00:00", "") + "+00:00")
             from datetime import timedelta
             update["locked_until"] = (now + timedelta(minutes=15)).isoformat()
         await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    if user.get("disabled"):
+        raise HTTPException(status_code=403, detail="Account disabled")
+
     await db.login_attempts.delete_one({"identifier": identifier})
     uid = str(user["_id"])
-    access = create_access_token(uid, email, user["role"])
-    refresh = create_refresh_token(uid)
+    tv = int(user.get("token_version", 0))
+    access = create_access_token(uid, email, user["role"], tv)
+    refresh = create_refresh_token(uid, tv)
     set_auth_cookies(response, access, refresh)
     await audit(email, "login", target=uid)
     return {"id": uid, "email": email, "name": user["name"], "role": user["role"]}
@@ -196,14 +199,37 @@ async def delete_user(user_id: str, admin: dict = Depends(require_admin)):
 # -------------------- Log Sources --------------------
 @api.get("/sources")
 async def list_sources(_: dict = Depends(current_user)):
-    return await db.log_sources.find({}, {"_id": 0}).to_list(1000)
+    from datetime import timedelta
+    sources = await db.log_sources.find({}, {"_id": 0, "ingest_api_key": 0}).to_list(1000)
+    now = datetime.now(timezone.utc)
+    for s in sources:
+        s.setdefault("paused", False)
+        s.setdefault("retention_hours", 72)
+        last = s.get("last_event_at")
+        if not last:
+            s["health"] = "silent"
+            continue
+        last_dt = datetime.fromisoformat(last) if isinstance(last, str) else last
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
+        delta = now - last_dt
+        if delta > timedelta(minutes=30):
+            s["health"] = "silent"
+        elif delta > timedelta(minutes=5):
+            s["health"] = "delayed"
+        else:
+            s["health"] = "healthy"
+    return sources
 
 
 @api.post("/sources")
 async def create_source(body: SourceCreate, user: dict = Depends(current_user)):
+    import secrets
     doc = {
         "id": str(uuid.uuid4()), "name": body.name, "type": body.type,
         "description": body.description or "", "last_event_at": None,
+        "paused": False, "retention_hours": 72,
+        "ingest_api_key": secrets.token_urlsafe(24),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.log_sources.insert_one(doc)
@@ -212,32 +238,87 @@ async def create_source(body: SourceCreate, user: dict = Depends(current_user)):
     return doc
 
 
+class SourceUpdate(BaseModel):
+    paused: Optional[bool] = None
+    retention_hours: Optional[int] = Field(default=None, ge=1, le=72)
+    description: Optional[str] = None
+
+
+@api.patch("/sources/{name}")
+async def update_source(name: str, body: SourceUpdate, admin: dict = Depends(require_admin)):
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    r = await db.log_sources.update_one({"name": name}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Source not found")
+    await audit(admin["email"], "update_source", target=name, meta=updates)
+    return {"ok": True, **updates}
+
+
+@api.delete("/sources/{name}")
+async def delete_source(name: str, purge_events: bool = False,
+                        admin: dict = Depends(require_admin)):
+    r = await db.log_sources.delete_one({"name": name})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Source not found")
+    meta = {"purge_events": purge_events, "events_deleted": 0, "raw_deleted": 0}
+    if purge_events:
+        e = await db.normalized_events.delete_many({"source_name": name})
+        r2 = await db.raw_logs.delete_many({"source_name": name})
+        meta["events_deleted"] = e.deleted_count
+        meta["raw_deleted"] = r2.deleted_count
+    await audit(admin["email"], "delete_source", target=name, meta=meta)
+    return {"ok": True, **meta}
+
+
+@api.post("/sources/{name}/rotate-key")
+async def rotate_source_key(name: str, admin: dict = Depends(require_admin)):
+    import secrets
+    new_key = secrets.token_urlsafe(24)
+    r = await db.log_sources.update_one({"name": name}, {"$set": {"ingest_api_key": new_key}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Source not found")
+    await audit(admin["email"], "rotate_source_key", target=name)
+    return {"ingest_api_key": new_key}
+
+
 # -------------------- Ingestion --------------------
 async def _ingest_events(records: list, source_name: str, actor_email: str):
     if not records:
         return {"ingested": 0, "alerts": 0}
+
+    source = await db.log_sources.find_one({"name": source_name})
+    if source and source.get("paused"):
+        raise HTTPException(status_code=409, detail=f"Source '{source_name}' is paused")
+    retention_hours = int((source or {}).get("retention_hours") or 72)
+    retention_hours = max(1, min(72, retention_hours))
+
+    from datetime import timedelta
     normalized = [normalize_record(r, source_name) for r in records]
-    # store raw + normalized
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=retention_hours)
     raw_docs = [{"id": str(uuid.uuid4()), "source_name": source_name,
-                 "payload": n["raw_log"], "created_at": n["timestamp"]} for n in normalized]
+                 "payload": n["raw_log"], "created_at": n["timestamp"],
+                 "expires_at": expires_at} for n in normalized]
     await db.raw_logs.insert_many(raw_docs)
-    # normalized: store as-is (raw_log kept inside)
     await db.normalized_events.insert_many([dict(n) for n in normalized])
 
-    # update source last_event_at
     latest = max(n["timestamp"] for n in normalized)
     await db.log_sources.update_one(
         {"name": source_name},
         {"$set": {"last_event_at": latest}}, upsert=True,
     )
 
-    # run detection
-    alerts = run_all_rules(normalized)
+    # load current blocklist to run R010
+    bl_docs = await db.ip_blocklist.find({}).to_list(5000)
+    blocklist = {d["ip"]: d for d in bl_docs}
+
+    alerts = run_all_rules(normalized, blocklist=blocklist)
     async_alerts = await detect_new_device_admin(db, normalized)
     alerts.extend(async_alerts)
     if alerts:
         await db.alerts.insert_many([dict(a) for a in alerts])
-        # fire-and-log emails (never raises)
         try:
             statuses = await notify_alerts(db, alerts)
             logger.info("notify_alerts: %s", {s: statuses.count(s) for s in set(statuses)})
@@ -415,6 +496,190 @@ async def update_alert(alert_id: str, body: AlertStatusUpdate,
     return {"ok": True}
 
 
+# -------------------- Response Actions (human-approved) --------------------
+@api.get("/alerts/{alert_id}/recommended-actions")
+async def get_recommended_actions(alert_id: str, _: dict = Depends(current_user)):
+    alert = await db.alerts.find_one({"id": alert_id}, {"_id": 0})
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    types = RECOMMENDED_BY_RULE.get(alert["rule_id"], [])
+    kf = alert.get("key_fields") or {}
+    default_target = {
+        "block_ip": kf.get("src_ip") or "",
+        "disable_account": kf.get("user") or "",
+        "revoke_session": kf.get("user") or "",
+        "escalate_incident": "",
+    }
+    return [
+        {"type": t, "label": ACTION_LABELS[t], "default_target": default_target.get(t, "")}
+        for t in types
+    ]
+
+
+class ApproveActionBody(BaseModel):
+    action_type: str
+    target: Optional[str] = None
+    note: Optional[str] = None
+
+
+@api.post("/alerts/{alert_id}/approve")
+async def approve_alert_action(alert_id: str, body: ApproveActionBody,
+                                user: dict = Depends(current_user)):
+    return await approve_action(db, alert_id, body.action_type, user,
+                                 target_override=body.target, note=body.note or "")
+
+
+@api.get("/alerts/{alert_id}/actions")
+async def list_alert_actions(alert_id: str, _: dict = Depends(current_user)):
+    docs = await db.response_actions.find({"alert_id": alert_id}, {"_id": 0}) \
+        .sort("created_at", -1).to_list(200)
+    return docs
+
+
+# -------------------- IP Blocklist --------------------
+@api.get("/blocklist")
+async def get_blocklist(_: dict = Depends(current_user)):
+    return await db.ip_blocklist.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+
+
+@api.delete("/blocklist/{ip}")
+async def unblock_ip(ip: str, admin: dict = Depends(require_admin)):
+    r = await db.ip_blocklist.delete_one({"ip": ip})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="IP not blocked")
+    await audit(admin["email"], "unblock_ip", target=ip)
+    return {"ok": True}
+
+
+# -------------------- Incidents --------------------
+@api.get("/incidents")
+async def list_incidents(status: Optional[str] = None, _: dict = Depends(current_user)):
+    q = {}
+    if status:
+        q["status"] = status
+    return await db.incidents.find(q, {"_id": 0}).sort("opened_at", -1).to_list(500)
+
+
+@api.get("/incidents/{incident_id}")
+async def get_incident(incident_id: str, _: dict = Depends(current_user)):
+    inc = await db.incidents.find_one({"id": incident_id}, {"_id": 0})
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    inc["alerts"] = await db.alerts.find(
+        {"id": {"$in": inc.get("alert_ids") or []}}, {"_id": 0}
+    ).to_list(200)
+    inc["evidence_events"] = await db.normalized_events.find(
+        {"event_id": {"$in": inc.get("evidence_event_ids") or []}}, {"_id": 0}
+    ).to_list(500)
+    return inc
+
+
+class IncidentUpdate(BaseModel):
+    status: Optional[str] = Field(default=None, pattern="^(Open|Investigating|Closed)$")
+    note: Optional[str] = None
+
+
+@api.patch("/incidents/{incident_id}")
+async def update_incident(incident_id: str, body: IncidentUpdate,
+                           user: dict = Depends(current_user)):
+    inc = await db.incidents.find_one({"id": incident_id})
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    push = None
+    if body.status:
+        updates["status"] = body.status
+    if body.note:
+        push = {"notes": {"at": datetime.now(timezone.utc).isoformat(),
+                          "by": user["email"], "text": body.note}}
+    op = {"$set": updates}
+    if push:
+        op["$push"] = push
+    await db.incidents.update_one({"id": incident_id}, op)
+    await audit(user["email"], "update_incident", target=incident_id,
+                meta={"status": body.status, "note": body.note})
+    return {"ok": True}
+
+
+# -------------------- Event annotations --------------------
+class EventAnnotation(BaseModel):
+    tags: Optional[List[str]] = None
+    note: Optional[str] = None
+    reviewed: Optional[bool] = None
+
+
+@api.patch("/events/{event_id}")
+async def annotate_event(event_id: str, body: EventAnnotation,
+                          user: dict = Depends(current_user)):
+    updates: Dict[str, Any] = {}
+    push = None
+    if body.tags is not None:
+        updates["tags"] = [t.strip() for t in body.tags if t.strip()]
+    if body.reviewed is not None:
+        updates["reviewed"] = body.reviewed
+        if body.reviewed:
+            updates["reviewed_by"] = user["email"]
+            updates["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+    if body.note:
+        push = {"notes": {"at": datetime.now(timezone.utc).isoformat(),
+                          "by": user["email"], "text": body.note}}
+    if not updates and not push:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    op = {}
+    if updates:
+        op["$set"] = updates
+    if push:
+        op["$push"] = push
+    r = await db.normalized_events.update_one({"event_id": event_id}, op)
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Event not found")
+    await audit(user["email"], "annotate_event", target=event_id,
+                meta={"tags": body.tags, "reviewed": body.reviewed, "note": body.note})
+    return {"ok": True}
+
+
+# -------------------- CSV export --------------------
+@api.get("/export/events.csv")
+async def export_events_csv(
+    q: Optional[str] = None, severity: Optional[str] = None,
+    src_ip: Optional[str] = None, user_name: Optional[str] = None,
+    app_name: Optional[str] = None, limit: int = 5000,
+    user: dict = Depends(current_user),
+):
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+    query = {}
+    if severity: query["severity"] = severity
+    if src_ip: query["src_ip"] = src_ip
+    if user_name: query["user"] = user_name
+    if app_name: query["app"] = app_name
+    if q:
+        query["$or"] = [
+            {"src_ip": {"$regex": q, "$options": "i"}},
+            {"user": {"$regex": q, "$options": "i"}},
+            {"host": {"$regex": q, "$options": "i"}},
+            {"url": {"$regex": q, "$options": "i"}},
+            {"action": {"$regex": q, "$options": "i"}},
+        ]
+    cols = ["event_id", "timestamp", "src_ip", "dst_ip", "user", "host", "app",
+            "action", "url", "http_method", "http_status", "severity",
+            "country", "user_agent", "source_name", "reviewed"]
+    docs = await db.normalized_events.find(query, {"_id": 0, "raw_log": 0}) \
+        .sort("timestamp", -1).limit(min(limit, 50000)).to_list(limit)
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    w.writeheader()
+    for d in docs:
+        w.writerow(d)
+    await audit(user["email"], "export_events_csv", target="events",
+                meta={"count": len(docs), "filters": {"q": q, "severity": severity}})
+    buf.seek(0)
+    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
+                              headers={"Content-Disposition":
+                                       "attachment; filename=sentinelflow_events.csv"})
+
+
 # -------------------- Rules --------------------
 @api.get("/rules")
 async def list_rules(_: dict = Depends(current_user)):
@@ -504,8 +769,24 @@ async def startup():
     await db.known_devices.create_index([("user", 1), ("src_ip", 1), ("user_agent", 1)], unique=True)
     # notification dedup TTL — MongoDB will auto-delete expired keys
     await db.alert_notifications.create_index("expires_at", expireAfterSeconds=0)
-    # TTL: purge raw_logs older than 72h (259200s). Uses BSON date field.
-    await db.raw_logs.create_index("created_at_bson", expireAfterSeconds=72 * 3600)
+    # TTL: per-source retention lives in raw_logs.expires_at (BSON date).
+    # Drop legacy TTL index if it exists to avoid conflicts.
+    try:
+        existing_idx = await db.raw_logs.index_information()
+        if "created_at_bson_1" in existing_idx:
+            await db.raw_logs.drop_index("created_at_bson_1")
+    except Exception:
+        pass
+    await db.raw_logs.create_index("expires_at", expireAfterSeconds=0)
+    await db.raw_logs.create_index("source_name")
+    # Blocklist + incidents + response actions
+    await db.ip_blocklist.create_index("ip", unique=True)
+    await db.incidents.create_index("opened_at")
+    await db.response_actions.create_index("alert_id")
+    await db.response_actions.create_index("created_at")
+    # normalized events extras
+    await db.normalized_events.create_index("source_name")
+    await db.normalized_events.create_index("reviewed")
 
     # seed admin
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@sentinelflow.io").lower()
