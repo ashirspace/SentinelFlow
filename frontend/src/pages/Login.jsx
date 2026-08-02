@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ShieldAlert } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -16,10 +16,12 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  if (user && typeof user === "object") {
-    const dest = location.state?.from?.pathname || "/dashboard";
-    navigate(dest, { replace: true });
-  }
+  useEffect(() => {
+    if (user && typeof user === "object") {
+      const dest = location.state?.from?.pathname || "/dashboard";
+      navigate(dest, { replace: true });
+    }
+  }, [user, location, navigate]);
 
   const submit = async (e) => {
     e.preventDefault();
