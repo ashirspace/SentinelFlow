@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import api from "@/lib/api";
 import { PageHeader, SeverityBadge } from "@/components/common";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -31,6 +32,7 @@ const KIND_ICON = {
 };
 
 export default function Incidents() {
+  useDocumentTitle("Incidents · SentinelFlow");
   const [items, setItems] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [detail, setDetail] = useState(null);

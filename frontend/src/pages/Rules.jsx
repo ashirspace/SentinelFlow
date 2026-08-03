@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import api from "@/lib/api";
 import { PageHeader, SeverityBadge } from "@/components/common";
 import { Radar } from "lucide-react";
 
 export default function Rules() {
+  useDocumentTitle("Rules · SentinelFlow");
   const [rules, setRules] = useState([]);
 
   useEffect(() => {

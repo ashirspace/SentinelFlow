@@ -36,7 +36,15 @@ mongo_url = os.environ["MONGO_URL"]
 mongo = AsyncIOMotorClient(mongo_url)
 db = mongo[os.environ["DB_NAME"]]
 
-app = FastAPI(title="SentinelFlow")
+ENVIRONMENT = (os.environ.get("ENVIRONMENT") or os.environ.get("ENV") or "development").strip().lower()
+IS_PRODUCTION = ENVIRONMENT == "production"
+
+app = FastAPI(
+    title="SentinelFlow",
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
+)
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
@@ -1130,6 +1138,22 @@ async def root():
 # -------------------- Startup --------------------
 @app.on_event("startup")
 async def startup():
+    admin_email_env = os.environ.get("ADMIN_EMAIL")
+    admin_pw_env = os.environ.get("ADMIN_PASSWORD")
+    if IS_PRODUCTION:
+        missing = [
+            name for name, value in (
+                ("ADMIN_EMAIL", admin_email_env),
+                ("ADMIN_PASSWORD", admin_pw_env),
+            )
+            if not value or not value.strip()
+        ]
+        if missing:
+            raise RuntimeError(
+                "Production startup requires the following environment variables: "
+                + ", ".join(missing)
+            )
+
     # indexes
     await db.users.create_index("email", unique=True)
     await db.login_attempts.create_index("identifier")
@@ -1165,8 +1189,8 @@ async def startup():
     await db.normalized_events.create_index("reviewed")
 
     # seed admin
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@sentinelflow.io").lower()
-    admin_pw = os.environ.get("ADMIN_PASSWORD", "Admin@12345")
+    admin_email = (admin_email_env or "admin@sentinelflow.io").lower()
+    admin_pw = admin_pw_env or "Admin@12345"
     existing = await db.users.find_one({"email": admin_email})
     if not existing:
         await db.users.insert_one({
@@ -1182,16 +1206,17 @@ async def startup():
             {"email": admin_email},
             {"$set": {"password_hash": hash_password(admin_pw)}},
         )
-    # seed analyst
-    analyst_email = "analyst@sentinelflow.io"
-    if not await db.users.find_one({"email": analyst_email}):
-        await db.users.insert_one({
-            "email": analyst_email,
-            "password_hash": hash_password("Analyst@123"),
-            "name": "Demo Analyst",
-            "role": "analyst",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+    # seed analyst outside production only
+    if not IS_PRODUCTION:
+        analyst_email = "analyst@sentinelflow.io"
+        if not await db.users.find_one({"email": analyst_email}):
+            await db.users.insert_one({
+                "email": analyst_email,
+                "password_hash": hash_password("Analyst@123"),
+                "name": "Demo Analyst",
+                "role": "analyst",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
     logger.info("SentinelFlow startup complete.")
 
 
