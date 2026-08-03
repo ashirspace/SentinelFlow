@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import api from "@/lib/api";
 import { PageHeader } from "@/components/common";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ import { toast } from "sonner";
 import { Zap, TestTube2, Slack } from "lucide-react";
 
 export default function Notifications() {
+  useDocumentTitle("Notifications · SentinelFlow");
   const [prefs, setPrefs] = useState(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);

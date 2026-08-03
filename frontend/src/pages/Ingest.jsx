@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import api from "@/lib/api";
 import { PageHeader } from "@/components/common";
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,7 @@ import { UploadCloud, Server, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Ingest() {
+  useDocumentTitle("Ingest · SentinelFlow");
   const [sources, setSources] = useState([]);
   const [selectedSource, setSelectedSource] = useState("");
   const [file, setFile] = useState(null);

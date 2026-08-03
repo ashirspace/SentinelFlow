@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
 import { PageHeader, SeverityBadge, StatusBadge, JsonView } from "@/components/common";
@@ -32,6 +33,7 @@ const ACTION_HINT = {
 };
 
 export default function Alerts() {
+  useDocumentTitle("Alerts · SentinelFlow");
   const [params, setParams] = useSearchParams();
   const [alerts, setAlerts] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");

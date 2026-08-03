@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { Link } from "react-router-dom";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -18,6 +19,7 @@ const SEV_COLOR = {
 };
 
 export default function Dashboard() {
+  useDocumentTitle("Dashboard · SentinelFlow");
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [alerts, setAlerts] = useState([]);

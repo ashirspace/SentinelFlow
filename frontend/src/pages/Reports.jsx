@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import api, { API_BASE } from "@/lib/api";
 import { PageHeader, SeverityBadge } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ function toLocalIso(d) {
 }
 
 export default function Reports() {
+  useDocumentTitle("Reports · SentinelFlow");
   const [start, setStart] = useState(toLocalIso(new Date(Date.now() - 7 * 86400000)));
   const [end, setEnd] = useState(toLocalIso(new Date()));
   const [summary, setSummary] = useState(null);

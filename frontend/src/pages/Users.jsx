@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import api from "@/lib/api";
 import { PageHeader } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Users() {
+  useDocumentTitle("Users · SentinelFlow");
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState({ email: "", password: "", name: "", role: "analyst" });
   const [creating, setCreating] = useState(false);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ShieldAlert } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -8,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { formatApiError } from "@/lib/api";
 
 export default function Login() {
+  useDocumentTitle("Sign in · SentinelFlow");
   const { login, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();

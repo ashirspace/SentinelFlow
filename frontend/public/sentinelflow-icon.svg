@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-labelledby="title">
+  <title id="title">SentinelFlow shield alert</title>
+  <rect width="24" height="24" rx="4.5" fill="#0A0B0E" />
+  <rect x="0.75" y="0.75" width="22.5" height="22.5" rx="3.75" fill="none" stroke="#1F232B" stroke-width="0.75" />
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" stroke="#4F46E5" stroke-width="1.8" />
+    <path d="M12 8v4" stroke="#EF4444" stroke-width="1.8" />
+    <path d="M12 16h.01" stroke="#EF4444" stroke-width="2.4" />
+  </g>
+</svg>

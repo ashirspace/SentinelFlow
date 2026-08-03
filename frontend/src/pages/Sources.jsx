@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import api from "@/lib/api";
 import { PageHeader } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ const HEALTH = {
 };
 
 export default function Sources() {
+  useDocumentTitle("Sources · SentinelFlow");
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [sources, setSources] = useState([]);

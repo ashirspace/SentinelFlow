@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import useDocumentTitle from "@/hooks/useDocumentTitle";
 import api from "@/lib/api";
 import { PageHeader } from "@/components/common";
 
 export default function Audit() {
+  useDocumentTitle("Audit · SentinelFlow");
   const [logs, setLogs] = useState([]);
   useEffect(() => {
     api.get("/audit").then(({ data }) => setLogs(data)).catch(() => {});
