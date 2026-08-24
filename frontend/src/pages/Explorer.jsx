@@ -27,8 +27,8 @@ export default function Explorer() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const params = { limit: 200 };
       if (q) params.q = q;
@@ -40,7 +40,7 @@ export default function Explorer() {
     } catch (e) {
       toast.error("Failed to fetch events");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -87,6 +87,12 @@ export default function Explorer() {
   useEffect(() => { loadSaved(); }, []);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [severity, appName]);
+
+  useEffect(() => {
+    const id = setInterval(() => load({ silent: true }), 15000);
+    return () => clearInterval(id);
+    /* eslint-disable-next-line */
+  }, [q, severity, appName]);
 
   const filterParams = () => {
     const p = new URLSearchParams();

@@ -42,7 +42,11 @@ export default function Sources() {
     setSources(data);
     setIngestCfg(cfg);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
+  }, []);
 
   const createSource = async (e) => {
     e.preventDefault();
@@ -342,6 +346,7 @@ export default function Sources() {
                 </SelectTrigger>
                 <SelectContent className="bg-popover border border-border">
                   <SelectItem value="web">web</SelectItem>
+                  <SelectItem value="akamai">akamai</SelectItem>
                   <SelectItem value="auth">auth</SelectItem>
                   <SelectItem value="os">os</SelectItem>
                   <SelectItem value="db">db</SelectItem>

@@ -19,6 +19,7 @@ from auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     set_auth_cookies, clear_auth_cookies, get_current_user,
 )
+from akamai_ingest import parse_akamai_payload
 from normalize import normalize_record, parse_upload
 from rules import run_all_rules, detect_silent_sources, detect_new_device_admin, RULES_META
 from seed import sample_events, demo_sources
@@ -327,18 +328,49 @@ async def revoke_source_key(name: str, admin: dict = Depends(require_admin)):
 @api.get("/ingest/config")
 async def ingest_config(_: dict = Depends(current_user)):
     import ingest_v1 as _v1
-    base = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    base = (
+        os.environ.get("PUBLIC_INGEST_URL")
+        or os.environ.get("BACKEND_PUBLIC_URL")
+        or os.environ.get("FRONTEND_URL", "")
+    ).rstrip("/")
     return {
         "endpoint": f"{base}/api/v1/ingest" if base else "/api/v1/ingest",
+        "akamai_endpoint_template": f"{base}/api/integrations/akamai/{{source_name}}/logs"
+                                    if base else "/api/integrations/akamai/{source_name}/logs",
         "rate_limit_per_min": _v1.RATE_LIMIT_PER_MIN,
         "max_events_per_request": _v1.MAX_EVENTS_PER_REQ,
         "max_body_bytes": _v1.MAX_BODY_BYTES,
         "auth_header": "Authorization: Bearer sfk_...",
         "alt_header": "X-Ingest-Key: sfk_...",
+        "akamai_required_header": "X-Ingest-Key: sfk_...",
+        "akamai_log_format": "JSON",
     }
 
 
 # -------------------- Ingestion --------------------
+async def _auth_source_from_ingest_key(request: Request) -> dict:
+    import ingest_v1 as _v1
+    key = _v1.extract_key(request.headers)
+    if not key or not key.startswith(_v1.KEY_PREFIX):
+        raise HTTPException(status_code=401, detail="Missing or malformed ingest key")
+    key_hash = _v1.hash_key(key)
+    source = await db.log_sources.find_one({"ingest_api_key_hash": key_hash})
+    if not source:
+        raise HTTPException(status_code=401, detail="Invalid ingest key")
+    if source.get("paused"):
+        raise HTTPException(status_code=423, detail="Source is paused")
+    allowed, remaining, reset = _v1.check_rate(key_hash)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded ({_v1.RATE_LIMIT_PER_MIN}/min). Retry in {reset}s",
+            headers={"Retry-After": str(reset)},
+        )
+    source["_rate_remaining"] = remaining
+    source["_rate_reset"] = reset
+    return source
+
+
 async def _ingest_events(records: list, source_name: str, actor_email: str):
     if not records:
         return {"ingested": 0, "alerts": 0}
@@ -401,6 +433,35 @@ async def ingest(source_name: str = Query(...), file: UploadFile = File(...),
     if not isinstance(records, list) or not records:
         raise HTTPException(status_code=400, detail="No records found in file")
     return await _ingest_events(records, source_name, user["email"])
+
+
+@api.post("/integrations/akamai/{source_name}/logs")
+async def ingest_akamai_logs(source_name: str, request: Request):
+    import ingest_v1 as _v1
+    source = await _auth_source_from_ingest_key(request)
+    if source["name"] != source_name:
+        raise HTTPException(status_code=403, detail="Ingest key is not scoped to this Akamai source")
+
+    raw = await request.body()
+    if len(raw) > _v1.MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+    try:
+        events = parse_akamai_payload(raw)
+        events = _v1.validate_batch(events)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    result = await _ingest_events(events, source["name"], f"akamai:{source['name']}")
+    return {
+        **result,
+        "source": source["name"],
+        "integration": "akamai_datastream",
+        "rate_limit": {
+            "remaining": source.get("_rate_remaining"),
+            "reset_seconds": source.get("_rate_reset"),
+            "limit_per_min": _v1.RATE_LIMIT_PER_MIN,
+        },
+    }
 
 
 class SyslogBody(BaseModel):
@@ -1236,25 +1297,7 @@ v1 = APIRouter(prefix="/api/v1")
 
 
 async def _auth_ingest_source(request: _Req) -> dict:
-    key = _v1.extract_key(request.headers)
-    if not key or not key.startswith(_v1.KEY_PREFIX):
-        raise HTTPException(status_code=401, detail="Missing or malformed ingest key")
-    key_hash = _v1.hash_key(key)
-    source = await db.log_sources.find_one({"ingest_api_key_hash": key_hash})
-    if not source:
-        raise HTTPException(status_code=401, detail="Invalid ingest key")
-    if source.get("paused"):
-        raise HTTPException(status_code=423, detail="Source is paused")
-    allowed, remaining, reset = _v1.check_rate(key_hash)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit exceeded ({_v1.RATE_LIMIT_PER_MIN}/min). Retry in {reset}s",
-            headers={"Retry-After": str(reset)},
-        )
-    source["_rate_remaining"] = remaining
-    source["_rate_reset"] = reset
-    return source
+    return await _auth_source_from_ingest_key(request)
 
 
 @v1.get("/ping")

@@ -15,6 +15,9 @@ import { toast } from "sonner";
  */
 export default function IngestSnippets({ ingestEndpoint, apiKey, sourceName }) {
   const [copied, setCopied] = useState("");
+  const endpointUrl = new URL(ingestEndpoint, window.location.origin);
+  const akamaiEndpoint = `${endpointUrl.origin}/api/integrations/akamai/${encodeURIComponent(sourceName)}/logs`;
+  const fluentTls = endpointUrl.protocol === "https:" ? "On" : "Off";
 
   const copy = (label, text) => {
     navigator.clipboard.writeText(text);
@@ -41,10 +44,10 @@ export default function IngestSnippets({ ingestEndpoint, apiKey, sourceName }) {
 [OUTPUT]
     Name              http
     Match             *
-    Host              ${new URL(ingestEndpoint).host}
-    Port              443
-    URI               /api/v1/ingest
-    tls               On
+    Host              ${endpointUrl.host}
+    Port              ${endpointUrl.protocol === "http:" ? "80" : "443"}
+    URI               ${endpointUrl.pathname}
+    tls               ${fluentTls}
     Format            json
     Header            Authorization Bearer ${apiKey}
     Retry_Limit       3
@@ -76,6 +79,20 @@ async function shipToSentinelFlow(event) {
   });
 }`;
 
+  const akamai =
+`Akamai DataStream 2 destination settings
+
+Destination type: Custom HTTPS
+Endpoint URL: ${akamaiEndpoint}
+Log format: JSON
+Authentication: None
+Custom request header:
+  X-Ingest-Key: ${apiKey}
+Content-Type: application/json
+
+Flow:
+Your Website -> Akamai Edge -> DataStream 2 -> SentinelFlow FastAPI -> MongoDB -> Dashboard/Explorer`;
+
   return (
     <div className="space-y-4">
       <div className="border border-amber-500/30 bg-amber-500/5 rounded-sm p-3">
@@ -101,8 +118,11 @@ async function shipToSentinelFlow(event) {
         <CopyRow label="API key" value={apiKey} copied={copied} onCopy={copy} testid="copy-api-key" />
       </div>
 
-      <Tabs defaultValue="curl" className="w-full">
-        <TabsList className="grid grid-cols-4 w-full bg-secondary">
+      <Tabs defaultValue="akamai" className="w-full">
+        <TabsList className="grid grid-cols-5 w-full bg-secondary">
+          <TabsTrigger value="akamai" data-testid="snippet-tab-akamai" className="font-mono text-[10px] uppercase tracking-widest">
+            Akamai
+          </TabsTrigger>
           <TabsTrigger value="curl" data-testid="snippet-tab-curl" className="font-mono text-[10px] uppercase tracking-widest">
             <Terminal className="w-3 h-3 mr-1.5" /> curl
           </TabsTrigger>
@@ -116,6 +136,7 @@ async function shipToSentinelFlow(event) {
             Node
           </TabsTrigger>
         </TabsList>
+        <SnippetTab value="akamai" code={akamai} label="Akamai DataStream settings" copied={copied} onCopy={copy} />
         <SnippetTab value="curl" code={curlSnippet} label="curl one-liner" copied={copied} onCopy={copy} />
         <SnippetTab value="fluent" code={fluentBit} label="fluent-bit.conf" copied={copied} onCopy={copy} />
         <SnippetTab value="vector" code={vector} label="vector.toml" copied={copied} onCopy={copy} />

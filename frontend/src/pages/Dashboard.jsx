@@ -41,7 +41,11 @@ export default function Dashboard() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
+  }, []);
 
   const seed = async () => {
     setSeeding(true);
