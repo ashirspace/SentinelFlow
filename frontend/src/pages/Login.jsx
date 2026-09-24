@@ -13,8 +13,8 @@ export default function Login() {
   const { login, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState("admin@sentinelflow.io");
-  const [password, setPassword] = useState("Admin@12345");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -100,6 +100,7 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@company.com"
                 className="mt-1.5 font-mono"
                 required
               />
@@ -114,6 +115,7 @@ export default function Login() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
                 className="mt-1.5 font-mono"
                 required
               />
@@ -137,12 +139,6 @@ export default function Login() {
           >
             {loading ? "Authenticating…" : "Sign in →"}
           </Button>
-
-          <div className="text-[11px] font-mono text-muted-foreground border border-border/60 rounded-sm p-3 leading-relaxed">
-            <div className="uppercase tracking-widest mb-1">Demo credentials</div>
-            <div>admin@sentinelflow.io / Admin@12345</div>
-            <div>analyst@sentinelflow.io / Analyst@123</div>
-          </div>
         </form>
       </div>
     </div>
