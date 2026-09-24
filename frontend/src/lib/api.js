@@ -1,7 +1,13 @@
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-export const API_BASE = `${BACKEND_URL}/api`;
+// In browser production deployments (non-localhost), use same-origin relative /api
+// to prevent Mixed Content (HTTPS -> HTTP) and cross-origin cookie issues.
+const isBrowser = typeof window !== "undefined";
+const isLocalhost = isBrowser && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+const rawBackend = process.env.REACT_APP_BACKEND_URL || "";
+const BACKEND_URL = (isBrowser && !isLocalhost) ? "" : rawBackend;
+export const API_BASE = BACKEND_URL ? `${BACKEND_URL.replace(/\/+$/, "")}/api` : "/api";
 
 const api = axios.create({
   baseURL: API_BASE,
