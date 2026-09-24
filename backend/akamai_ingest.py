@@ -3,15 +3,59 @@
 DataStream can POST bundled JSON logs to a custom HTTPS endpoint. This module
 keeps the Akamai-specific shape out of the generic SentinelFlow ingest path.
 """
+import gzip
+import ipaddress
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+# Official Akamai DataStream & Edge Server CIDR blocks allowed for log delivery
+AKAMAI_INGEST_CIDRS = [
+    "23.64.0.0/14",
+    "23.72.0.0/13",
+    "69.192.0.0/16",
+    "72.246.0.0/15",
+    "88.221.0.0/16",
+    "92.122.0.0/15",
+    "96.6.0.0/15",
+    "96.16.0.0/15",
+    "104.64.0.0/10",
+    "118.214.0.0/16",
+    "172.224.0.0/12",
+    "172.232.0.0/13",
+    "173.222.0.0/15",
+    "184.50.0.0/15",
+    "184.84.0.0/14",
+]
+
+_AKAMAI_NETWORKS = [ipaddress.ip_network(cidr) for cidr in AKAMAI_INGEST_CIDRS]
+
+
+def is_akamai_ip(ip_str: Optional[str]) -> bool:
+    """Check if an IP address belongs to the official Akamai edge / egress CIDRs."""
+    if not ip_str:
+        return False
+    try:
+        ip = ipaddress.ip_address(str(ip_str).strip())
+        return any(ip in net for net in _AKAMAI_NETWORKS)
+    except ValueError:
+        return False
 
 
 def parse_akamai_payload(raw: bytes) -> List[Dict[str, Any]]:
     """Parse DataStream JSON/NDJSON payloads into event dictionaries."""
-    text = (raw or b"").decode("utf-8", errors="replace").strip()
+    if not raw or not raw.strip():
+        return []
+
+    # Auto-detect and decompress gzip payloads from Akamai
+    if raw.startswith(b"\x1f\x8b"):
+        try:
+            raw = gzip.decompress(raw)
+        except Exception as exc:
+            raise ValueError(f"failed to decompress gzip Akamai payload: {exc}") from exc
+
+    text = raw.decode("utf-8", errors="replace").strip()
     if not text:
-        raise ValueError("empty Akamai payload")
+        return []
 
     try:
         payload = json.loads(text)

@@ -13,10 +13,12 @@ import { toast } from "sonner";
  *   apiKey:         plaintext key (shown once)
  *   sourceName:     display + used in agent config comments
  */
-export default function IngestSnippets({ ingestEndpoint, apiKey, sourceName }) {
+export default function IngestSnippets({ ingestEndpoint, apiKey, sourceName, sourceType = "custom", connection = null }) {
   const [copied, setCopied] = useState("");
   const endpointUrl = new URL(ingestEndpoint, window.location.origin);
-  const akamaiEndpoint = `${endpointUrl.origin}/api/integrations/akamai/${encodeURIComponent(sourceName)}/logs`;
+  const akamaiEndpoint = connection?.endpoint || `${endpointUrl.origin}/api/integrations/akamai/${encodeURIComponent(sourceName)}/logs`;
+  const isAkamai = sourceType === "akamai";
+  const primaryEndpoint = isAkamai ? akamaiEndpoint : ingestEndpoint;
   const fluentTls = endpointUrl.protocol === "https:" ? "On" : "Off";
 
   const copy = (label, text) => {
@@ -27,8 +29,8 @@ export default function IngestSnippets({ ingestEndpoint, apiKey, sourceName }) {
   };
 
   const curlSnippet =
-`curl -X POST "${ingestEndpoint}" \\
-  -H "Authorization: Bearer ${apiKey}" \\
+`curl -X POST "${primaryEndpoint}" \\
+  -H "${isAkamai ? `X-Ingest-Key: ${apiKey}` : `Authorization: Bearer ${apiKey}`}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "events": [
@@ -89,9 +91,24 @@ Authentication: None
 Custom request header:
   X-Ingest-Key: ${apiKey}
 Content-Type: application/json
+Compression: Off / Do not gzip
 
 Flow:
 Your Website -> Akamai Edge -> DataStream 2 -> SentinelFlow FastAPI -> MongoDB -> Dashboard/Explorer`;
+
+  const genericHttps =
+`Generic HTTPS collector settings
+
+Endpoint URL: ${ingestEndpoint}
+Method: POST
+Content-Type: application/json
+Authentication header:
+  Authorization: Bearer ${apiKey}
+
+Body formats accepted:
+  { "events": [{...}, {...}] }
+  [{...}, {...}]
+  newline-delimited JSON`;
 
   return (
     <div className="space-y-4">
@@ -107,9 +124,9 @@ Your Website -> Akamai Edge -> DataStream 2 -> SentinelFlow FastAPI -> MongoDB -
 
       <div>
         <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
-          Ingest endpoint
+          {isAkamai ? "Akamai endpoint" : "Ingest endpoint"}
         </div>
-        <CopyRow label="Endpoint" value={ingestEndpoint} copied={copied} onCopy={copy} testid="copy-endpoint" />
+        <CopyRow label="Endpoint" value={primaryEndpoint} copied={copied} onCopy={copy} testid="copy-endpoint" />
       </div>
       <div>
         <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
@@ -118,9 +135,9 @@ Your Website -> Akamai Edge -> DataStream 2 -> SentinelFlow FastAPI -> MongoDB -
         <CopyRow label="API key" value={apiKey} copied={copied} onCopy={copy} testid="copy-api-key" />
       </div>
 
-      <Tabs defaultValue="akamai" className="w-full">
+      <Tabs defaultValue={isAkamai ? "akamai" : "curl"} className="w-full">
         <TabsList className="grid grid-cols-5 w-full bg-secondary">
-          <TabsTrigger value="akamai" data-testid="snippet-tab-akamai" className="font-mono text-[10px] uppercase tracking-widest">
+          <TabsTrigger value="akamai" data-testid="snippet-tab-akamai" className="font-mono text-[10px] uppercase tracking-widest" disabled={!isAkamai}>
             Akamai
           </TabsTrigger>
           <TabsTrigger value="curl" data-testid="snippet-tab-curl" className="font-mono text-[10px] uppercase tracking-widest">
@@ -137,7 +154,7 @@ Your Website -> Akamai Edge -> DataStream 2 -> SentinelFlow FastAPI -> MongoDB -
           </TabsTrigger>
         </TabsList>
         <SnippetTab value="akamai" code={akamai} label="Akamai DataStream settings" copied={copied} onCopy={copy} />
-        <SnippetTab value="curl" code={curlSnippet} label="curl one-liner" copied={copied} onCopy={copy} />
+        <SnippetTab value="curl" code={isAkamai ? curlSnippet : `${genericHttps}\n\n${curlSnippet}`} label="curl one-liner" copied={copied} onCopy={copy} />
         <SnippetTab value="fluent" code={fluentBit} label="fluent-bit.conf" copied={copied} onCopy={copy} />
         <SnippetTab value="vector" code={vector} label="vector.toml" copied={copied} onCopy={copy} />
         <SnippetTab value="node" code={nodeMiddleware} label="Node middleware" copied={copied} onCopy={copy} />

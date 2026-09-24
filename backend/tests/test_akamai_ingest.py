@@ -1,6 +1,6 @@
 import pytest
 
-from akamai_ingest import parse_akamai_payload
+from akamai_ingest import parse_akamai_payload, is_akamai_ip, AKAMAI_INGEST_CIDRS
 
 
 def test_parse_akamai_datastream_json_record():
@@ -80,3 +80,23 @@ def test_parse_akamai_ndjson():
 def test_parse_akamai_rejects_invalid_payload():
     with pytest.raises(ValueError):
         parse_akamai_payload(b"not json")
+
+
+def test_akamai_ip_validation():
+    # Test valid sample IPs within the configured CIDR blocks
+    assert is_akamai_ip("23.64.10.5") is True
+    assert is_akamai_ip("69.192.1.1") is True
+    assert is_akamai_ip("72.246.100.2") is True
+    assert is_akamai_ip("88.221.50.1") is True
+    assert is_akamai_ip("92.122.3.4") is True
+    assert is_akamai_ip("104.64.0.1") is True
+    assert is_akamai_ip("118.214.20.30") is True
+    assert is_akamai_ip("172.224.5.6") is True
+    assert is_akamai_ip("184.84.12.34") is True
+
+    # Test non-Akamai IPs
+    assert is_akamai_ip("8.8.8.8") is False
+    assert is_akamai_ip("1.1.1.1") is False
+    assert is_akamai_ip("192.168.1.1") is False
+    assert is_akamai_ip("") is False
+    assert is_akamai_ip(None) is False

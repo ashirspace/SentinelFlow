@@ -50,14 +50,19 @@ def create_refresh_token(user_id: str, token_version: int = 0) -> str:
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
 
+IS_PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() == "production"
+
+
 def set_auth_cookies(response, access_token: str, refresh_token: str):
+    secure = IS_PRODUCTION
+    samesite = "none" if IS_PRODUCTION else "lax"
     response.set_cookie(
-        key="access_token", value=access_token, httponly=True, secure=True,
-        samesite="none", max_age=ACCESS_TTL_MIN * 60, path="/",
+        key="access_token", value=access_token, httponly=True, secure=secure,
+        samesite=samesite, max_age=ACCESS_TTL_MIN * 60, path="/",
     )
     response.set_cookie(
-        key="refresh_token", value=refresh_token, httponly=True, secure=True,
-        samesite="none", max_age=REFRESH_TTL_DAYS * 86400, path="/",
+        key="refresh_token", value=refresh_token, httponly=True, secure=secure,
+        samesite=samesite, max_age=REFRESH_TTL_DAYS * 86400, path="/",
     )
 
 

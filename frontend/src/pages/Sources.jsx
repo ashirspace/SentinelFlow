@@ -28,7 +28,7 @@ export default function Sources() {
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState(null);
   const [retention, setRetention] = useState(72);
-  const [reveal, setReveal] = useState(null);       // {name, key} — shown ONCE
+  const [reveal, setReveal] = useState(null);       // {name, type, key, connection} — shown ONCE
   const [ingestCfg, setIngestCfg] = useState(null); // {endpoint, ...}
   const [newOpen, setNewOpen] = useState(false);
   const [newSrc, setNewSrc] = useState({ name: "", type: "web", description: "" });
@@ -56,7 +56,7 @@ export default function Sources() {
       const { data } = await api.post("/sources", newSrc);
       setNewOpen(false);
       setNewSrc({ name: "", type: "web", description: "" });
-      setReveal({ name: data.name, key: data.ingest_api_key });
+      setReveal({ name: data.name, type: data.type, key: data.ingest_api_key, connection: data.connection });
       await load();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Create failed");
@@ -83,8 +83,9 @@ export default function Sources() {
     setBusy(name);
     try {
       const { data } = await api.post(`/sources/${name}/rotate-key`);
-      setReveal({ name, key: data.ingest_api_key });
       await load();
+      const source = sources.find((s) => s.name === name);
+      setReveal({ name, type: source?.type || "custom", key: data.ingest_api_key, connection: source?.connection });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed");
     } finally {
@@ -163,6 +164,9 @@ export default function Sources() {
               <div className="mt-1 text-[11px] font-mono text-muted-foreground">
                 {ingestCfg.rate_limit_per_min} req/min · {ingestCfg.max_events_per_request} events/req · {Math.round(ingestCfg.max_body_bytes / 1000)} KB max · Bearer sfk_...
               </div>
+              <div className="mt-2 text-[11px] font-mono text-muted-foreground leading-relaxed">
+                For Akamai, use the per-source endpoint shown from the key/connect action. Keep gzip off and send the key as X-Ingest-Key.
+              </div>
             </div>
             <Button
               size="sm"
@@ -206,6 +210,11 @@ export default function Sources() {
                         ? <span className="font-mono text-cyan-300">key: {s.ingest_api_key_hint}</span>
                         : <span className="text-amber-400 uppercase tracking-widest">no key — rotate to create</span>}
                     </div>
+                    {s.connection?.endpoint && (
+                      <code className="block mt-1 text-[10px] text-cyan-300 break-all">
+                        {s.connection.endpoint}
+                      </code>
+                    )}
                   </td>
                   <td className="px-4 py-3 uppercase tracking-widest text-[10px] text-muted-foreground">
                     {s.type}
@@ -308,6 +317,8 @@ export default function Sources() {
               ingestEndpoint={ingestCfg.endpoint}
               apiKey={reveal.key}
               sourceName={reveal.name}
+              sourceType={reveal.type}
+              connection={reveal.connection}
             />
           )}
           <DialogFooter>
@@ -332,11 +343,16 @@ export default function Sources() {
               <Input
                 data-testid="new-source-name"
                 value={newSrc.name}
-                onChange={(e) => setNewSrc({ ...newSrc, name: e.target.value })}
-                placeholder="e.g. www-prod-nginx"
+                onChange={(e) => setNewSrc({ ...newSrc, name: e.target.value.trim() })}
+                pattern="[A-Za-z0-9][A-Za-z0-9_.-]{1,79}"
+                title="Use 2-80 URL-safe characters: letters, numbers, dot, underscore, or hyphen."
+                placeholder="e.g. akamai-abpplus"
                 className="mt-1.5 font-mono"
                 required
               />
+              <p className="mt-1 text-[10px] font-mono text-muted-foreground">
+                Use URL-safe names only: letters, numbers, dot, underscore, hyphen. Example: akamai-abpplus.
+              </p>
             </div>
             <div>
               <Label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Type</Label>
@@ -347,6 +363,10 @@ export default function Sources() {
                 <SelectContent className="bg-popover border border-border">
                   <SelectItem value="web">web</SelectItem>
                   <SelectItem value="akamai">akamai</SelectItem>
+                  <SelectItem value="cloudflare">cloudflare</SelectItem>
+                  <SelectItem value="fluent-bit">fluent-bit</SelectItem>
+                  <SelectItem value="vector">vector</SelectItem>
+                  <SelectItem value="custom">custom</SelectItem>
                   <SelectItem value="auth">auth</SelectItem>
                   <SelectItem value="os">os</SelectItem>
                   <SelectItem value="db">db</SelectItem>
