@@ -130,18 +130,37 @@ async def update_source(name: str, body: SourceUpdate, admin: dict = Depends(req
     return {"ok": True, **updates}
 
 
-@router.delete("/{name}")
-async def delete_source(name: str, purge_events: bool = False, admin: dict = Depends(require_admin)):
-    r = await db.log_sources.delete_one({"name": name})
+@router.delete("")
+@router.delete("/{name:path}")
+async def delete_source(
+    name: Optional[str] = None,
+    source_id: Optional[str] = None,
+    purge_events: bool = False,
+    admin: dict = Depends(require_admin),
+):
+    query = {}
+    if source_id:
+        query["id"] = source_id
+    elif name:
+        query["name"] = name
+    else:
+        raise HTTPException(status_code=400, detail="Must provide source name or source_id")
+
+    source = await db.log_sources.find_one(query)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    target_name = source.get("name", name or "")
+    r = await db.log_sources.delete_one({"_id": source["_id"]})
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Source not found")
     meta = {"purge_events": purge_events, "events_deleted": 0, "raw_deleted": 0}
-    if purge_events:
-        e = await db.normalized_events.delete_many({"source_name": name})
-        r2 = await db.raw_logs.delete_many({"source_name": name})
+    if purge_events and target_name:
+        e = await db.normalized_events.delete_many({"source_name": target_name})
+        r2 = await db.raw_logs.delete_many({"source_name": target_name})
         meta["events_deleted"] = e.deleted_count
         meta["raw_deleted"] = r2.deleted_count
-    await audit(admin["email"], "delete_source", target=name, meta=meta)
+    await audit(admin["email"], "delete_source", target=target_name, meta=meta)
     return {"ok": True, **meta}
 
 

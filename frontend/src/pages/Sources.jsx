@@ -107,12 +107,15 @@ export default function Sources() {
     }
   };
 
-  const del = async (name) => {
+  const del = async (s) => {
+    const name = typeof s === "object" ? s.name : s;
+    const sourceId = typeof s === "object" ? s.id : null;
     if (!confirm(`Delete source "${name}"? Events remain unless you also purge them.`)) return;
     const purge = confirm(`Also purge all events and raw logs from "${name}"? (Cancel keeps them for retention.)`);
     setBusy(name);
     try {
-      await api.delete(`/sources/${name}?purge_events=${purge}`);
+      const param = sourceId ? `source_id=${encodeURIComponent(sourceId)}` : `name=${encodeURIComponent(name)}`;
+      await api.delete(`/sources?${param}&purge_events=${purge}`);
       toast.success("Deleted");
       await load();
     } catch (e) {
@@ -256,7 +259,7 @@ export default function Sources() {
                               <ShieldOff className="w-3.5 h-3.5" />
                             </IconBtn>
                           )}
-                          <IconBtn testid={`delete-${s.name}`} title="Delete" tone="danger" onClick={() => del(s.name)} disabled={busy === s.name}>
+                          <IconBtn testid={`delete-${s.name}`} title="Delete" tone="danger" onClick={() => del(s)} disabled={busy === s.name}>
                             <Trash2 className="w-3.5 h-3.5" />
                           </IconBtn>
                         </>
