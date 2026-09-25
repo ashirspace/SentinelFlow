@@ -132,7 +132,7 @@ def _to_sentinelflow_event(record: Dict[str, Any]) -> Dict[str, Any]:
 
 def _akamai_url(record: Dict[str, Any], http_message: Dict[str, Any]) -> Any:
     path = _first(record, http_message, "reqPath", "path")
-    query = _first(record, "queryStr", "queryString")
+    query = _first(record, http_message, "queryStr", "queryString", "query")
     if path and query and query != "-":
         sep = "&" if "?" in str(path) else "?"
         return f"{path}{sep}{query}"
