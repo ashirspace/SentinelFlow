@@ -139,8 +139,19 @@ export default function Incidents() {
 
       <div className="px-8 space-y-2">
         {items.length === 0 && (
-          <div className="text-xs font-mono text-muted-foreground py-12 text-center border border-border/60 rounded-md bg-card/40">
-            No incidents yet. Open an alert and click "Escalate to incident" to start one.
+          <div className="p-16 text-center border border-dashed border-border/60 rounded-md bg-card/20">
+            <AlertTriangle className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+            <h3 className="text-sm font-semibold text-foreground">No Incidents Opened</h3>
+            <p className="text-xs text-muted-foreground mt-1.5 max-w-sm mx-auto mb-5 leading-relaxed">
+              Escalate high-severity alerts into correlated incidents with timeline evidence, or open a manual investigation.
+            </p>
+            <Button
+              onClick={() => setNewOpen(true)}
+              className="font-mono text-xs uppercase tracking-widest gap-2"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New Incident
+            </Button>
           </div>
         )}
         {items.map((i) => (

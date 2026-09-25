@@ -269,7 +269,26 @@ export default function Sources() {
                 </tr>
               ))}
               {sources.length === 0 && (
-                <tr><td colSpan="7" className="text-center text-muted-foreground py-12 text-xs">No sources yet.</td></tr>
+                <tr>
+                  <td colSpan="7" className="text-center py-16">
+                    <div className="flex flex-col items-center justify-center max-w-sm mx-auto text-center">
+                      <Server className="w-10 h-10 text-muted-foreground/40 mb-3" />
+                      <h3 className="text-sm font-semibold text-foreground mb-1">No Log Sources Configured</h3>
+                      <p className="text-xs text-muted-foreground mb-5 leading-relaxed">
+                        Connect your Akamai DataStream, web servers, or cloud infrastructure to begin streaming live security events.
+                      </p>
+                      {isAdmin && (
+                        <Button
+                          onClick={() => setNewOpen(true)}
+                          className="font-mono text-xs uppercase tracking-widest gap-2"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Add First Source
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -364,17 +383,17 @@ export default function Sources() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-popover border border-border">
-                  <SelectItem value="web">web</SelectItem>
-                  <SelectItem value="akamai">akamai</SelectItem>
-                  <SelectItem value="cloudflare">cloudflare</SelectItem>
-                  <SelectItem value="fluent-bit">fluent-bit</SelectItem>
-                  <SelectItem value="vector">vector</SelectItem>
-                  <SelectItem value="custom">custom</SelectItem>
-                  <SelectItem value="auth">auth</SelectItem>
-                  <SelectItem value="os">os</SelectItem>
-                  <SelectItem value="db">db</SelectItem>
-                  <SelectItem value="api">api</SelectItem>
-                  <SelectItem value="network">network</SelectItem>
+                  <SelectItem value="akamai">Akamai (DataStream 2)</SelectItem>
+                  <SelectItem value="web">Web (Nginx / Apache / IIS)</SelectItem>
+                  <SelectItem value="cloudflare">Cloudflare (Logpush)</SelectItem>
+                  <SelectItem value="custom">Custom (JSON / NDJSON)</SelectItem>
+                  <SelectItem value="fluent-bit">Fluent Bit</SelectItem>
+                  <SelectItem value="vector">Vector</SelectItem>
+                  <SelectItem value="auth">Auth / Identity (SSO / IAM)</SelectItem>
+                  <SelectItem value="os">OS (Linux / Windows Server)</SelectItem>
+                  <SelectItem value="api">API Gateway / Microservice</SelectItem>
+                  <SelectItem value="db">Database (Audit Logs)</SelectItem>
+                  <SelectItem value="network">Network (Firewall / Router)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

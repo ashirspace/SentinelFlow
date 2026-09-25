@@ -85,12 +85,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Root service health check
-@app.get("/")
-async def root():
-    return {"service": "SentinelFlow", "status": "ok"}
-
-
 # API Router prefix (/api)
 api = APIRouter(prefix="/api")
 
@@ -119,3 +113,37 @@ v1 = v1_router
 
 # Include the main /api router in FastAPI app
 app.include_router(api)
+
+# Static frontend serving if build exists
+_FRONTEND_BUILD = _BACKEND_DIR.parent / "frontend" / "build"
+if _FRONTEND_BUILD.is_dir():
+    from starlette.staticfiles import StaticFiles
+    from starlette.responses import FileResponse
+    from fastapi import HTTPException
+
+    static_path = _FRONTEND_BUILD / "static"
+    if static_path.is_dir():
+        app.mount("/static", StaticFiles(directory=str(static_path)), name="frontend_static")
+
+    @app.get("/")
+    async def serve_root():
+        index_file = _FRONTEND_BUILD / "index.html"
+        if index_file.is_file():
+            return FileResponse(index_file)
+        return {"service": "SentinelFlow", "status": "ok"}
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("redoc") or full_path.startswith("openapi.json"):
+            raise HTTPException(status_code=404, detail="Not found")
+        target = _FRONTEND_BUILD / full_path
+        if target.is_file():
+            return FileResponse(target)
+        index_file = _FRONTEND_BUILD / "index.html"
+        if index_file.is_file():
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Not found")
+else:
+    @app.get("/")
+    async def root():
+        return {"service": "SentinelFlow", "status": "ok"}

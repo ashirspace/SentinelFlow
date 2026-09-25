@@ -5,7 +5,10 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   BarChart, Bar, PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { Activity, Bell, AlertOctagon, EyeOff, ArrowUpRight, Mail, MailX } from "lucide-react";
+import {
+  Activity, Bell, AlertOctagon, EyeOff, ArrowUpRight, Mail, MailX,
+  RefreshCw, Plus, ShieldCheck,
+} from "lucide-react";
 import api from "@/lib/api";
 import { PageHeader, SeverityBadge } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -23,10 +26,11 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [alerts, setAlerts] = useState([]);
-  const [seeding, setSeeding] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [notifier, setNotifier] = useState(null);
 
   const load = async () => {
+    setLoading(true);
     try {
       const [s, a, n] = await Promise.all([
         api.get("/dashboard/stats"),
@@ -38,6 +42,8 @@ export default function Dashboard() {
       setNotifier(n.data);
     } catch (e) {
       toast.error("Failed to load dashboard");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -46,19 +52,6 @@ export default function Dashboard() {
     const id = setInterval(load, 15000);
     return () => clearInterval(id);
   }, []);
-
-  const seed = async () => {
-    setSeeding(true);
-    try {
-      const { data } = await api.post("/ingest/seed");
-      toast.success(`Seeded ${data.ingested} events · ${data.alerts} alerts`);
-      await load();
-    } catch (e) {
-      toast.error("Seed failed");
-    } finally {
-      setSeeding(false);
-    }
-  };
 
   return (
     <div className="pb-16">
@@ -83,16 +76,29 @@ export default function Dashboard() {
                 Email · {notifier.enabled ? "on" : "off"}
               </div>
             )}
+            <Button
+              onClick={load}
+              disabled={loading}
+              variant="outline"
+              size="sm"
+              data-testid="refresh-btn"
+              className="font-mono text-xs uppercase tracking-widest gap-2"
+              title="Refresh live metrics"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
             {user?.role === "admin" && (
-              <Button
-                onClick={seed}
-                disabled={seeding}
-                variant="outline"
-                data-testid="seed-demo-btn"
-                className="font-mono text-xs uppercase tracking-widest"
-              >
-                {seeding ? "Loading…" : "Load Demo Data"}
-              </Button>
+              <Link to="/sources">
+                <Button
+                  size="sm"
+                  data-testid="connect-source-btn"
+                  className="font-mono text-xs uppercase tracking-widest gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Connect Source
+                </Button>
+              </Link>
             )}
           </div>
         }
@@ -117,15 +123,23 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={stats?.timeseries || []} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
-                <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" />
-                <XAxis dataKey="hour" tick={{ fill: "#6b7280", fontSize: 10, fontFamily: "JetBrains Mono" }} tickFormatter={(v) => v?.slice(11)} />
-                <YAxis tick={{ fill: "#6b7280", fontSize: 10, fontFamily: "JetBrains Mono" }} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            {stats?.timeseries?.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={stats.timeseries} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" />
+                  <XAxis dataKey="hour" tick={{ fill: "#6b7280", fontSize: 10, fontFamily: "JetBrains Mono" }} tickFormatter={(v) => v?.slice(11)} />
+                  <YAxis tick={{ fill: "#6b7280", fontSize: 10, fontFamily: "JetBrains Mono" }} />
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                <Activity className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <span className="text-xs text-muted-foreground">No event telemetry in the last 24 hours</span>
+                <span className="text-[11px] text-muted-foreground/60 mt-1">Live ingest volume will graph here automatically</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -136,24 +150,32 @@ export default function Dashboard() {
           </div>
           <div className="text-base font-semibold mb-2">Distribution</div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={stats?.alerts_by_severity || []}
-                  dataKey="count"
-                  nameKey="severity"
-                  innerRadius={55}
-                  outerRadius={85}
-                  paddingAngle={2}
-                >
-                  {(stats?.alerts_by_severity || []).map((entry, i) => (
-                    <Cell key={i} fill={SEV_COLOR[entry.severity] || "#64748b"} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend wrapperStyle={{ fontSize: 10, fontFamily: "JetBrains Mono" }} />
-              </PieChart>
-            </ResponsiveContainer>
+            {stats?.alerts_by_severity?.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={stats.alerts_by_severity}
+                    dataKey="count"
+                    nameKey="severity"
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={2}
+                  >
+                    {stats.alerts_by_severity.map((entry, i) => (
+                      <Cell key={i} fill={SEV_COLOR[entry.severity] || "#64748b"} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Legend wrapperStyle={{ fontSize: 10, fontFamily: "JetBrains Mono" }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                <ShieldCheck className="w-8 h-8 text-emerald-500/40 mb-2" />
+                <span className="text-xs text-muted-foreground">0 Security Alerts</span>
+                <span className="text-[11px] text-muted-foreground/60 mt-1">All telemetry is clean and healthy</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -164,15 +186,23 @@ export default function Dashboard() {
           </div>
           <div className="text-base font-semibold mb-2">Traffic volume</div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats?.top_ips || []} layout="vertical" margin={{ top: 0, right: 20, left: 30, bottom: 0 }}>
-                <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" />
-                <XAxis type="number" tick={{ fill: "#6b7280", fontSize: 10, fontFamily: "JetBrains Mono" }} />
-                <YAxis type="category" dataKey="src_ip" tick={{ fill: "#d1d5db", fontSize: 10, fontFamily: "JetBrains Mono" }} width={110} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="count" fill="#06b6d4" />
-              </BarChart>
-            </ResponsiveContainer>
+            {stats?.top_ips?.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stats.top_ips} layout="vertical" margin={{ top: 0, right: 20, left: 30, bottom: 0 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" />
+                  <XAxis type="number" tick={{ fill: "#6b7280", fontSize: 10, fontFamily: "JetBrains Mono" }} />
+                  <YAxis type="category" dataKey="src_ip" tick={{ fill: "#d1d5db", fontSize: 10, fontFamily: "JetBrains Mono" }} width={110} />
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Bar dataKey="count" fill="#06b6d4" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                <Activity className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <span className="text-xs text-muted-foreground">No external IP traffic detected</span>
+                <span className="text-[11px] text-muted-foreground/60 mt-1">Ingested IP sources will rank here</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -191,8 +221,12 @@ export default function Dashboard() {
           </div>
           <div className="space-y-2">
             {alerts.length === 0 && (
-              <div className="text-xs text-muted-foreground font-mono py-8 text-center">
-                No alerts yet. Load demo data or upload logs.
+              <div className="text-center py-10 px-4 border border-dashed border-border/60 rounded-md bg-card/20">
+                <ShieldCheck className="w-8 h-8 text-emerald-500/70 mx-auto mb-2" />
+                <div className="text-xs font-semibold text-foreground">All systems quiet</div>
+                <div className="text-[11px] text-muted-foreground mt-1 max-w-xs mx-auto">
+                  No active security alerts. Ingested events will automatically be analyzed.
+                </div>
               </div>
             )}
             {alerts.map((a) => (

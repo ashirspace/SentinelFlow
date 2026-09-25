@@ -195,11 +195,21 @@ export default function Alerts() {
         </div>
       </div>
 
-      <div className="px-8 space-y-6">
-        <AlertGroup title="Likely malicious" tone="critical" alerts={grouped.critical} onOpen={openDetail} />
-        <AlertGroup title="Suspicious" tone="warning" alerts={grouped.suspicious} onOpen={openDetail} />
-        <AlertGroup title="Informational" tone="info" alerts={grouped.info} onOpen={openDetail} />
-      </div>
+      {alerts.length === 0 ? (
+        <div className="mx-8 p-16 text-center border border-dashed border-border/60 rounded-md bg-card/20">
+          <ShieldCheck className="w-10 h-10 text-emerald-500/60 mx-auto mb-3" />
+          <h3 className="text-sm font-semibold text-foreground">Alerts Inbox is Empty</h3>
+          <p className="text-xs text-muted-foreground mt-1.5 max-w-sm mx-auto leading-relaxed">
+            No security findings matching current filters. Ingested events from connected log sources are automatically analyzed in real time.
+          </p>
+        </div>
+      ) : (
+        <div className="px-8 space-y-6">
+          <AlertGroup title="Likely malicious" tone="critical" alerts={grouped.critical} onOpen={openDetail} />
+          <AlertGroup title="Suspicious" tone="warning" alerts={grouped.suspicious} onOpen={openDetail} />
+          <AlertGroup title="Informational" tone="info" alerts={grouped.info} onOpen={openDetail} />
+        </div>
+      )}
 
       <Sheet open={!!detail} onOpenChange={(o) => !o && closeDetail()}>
         <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border/60 overflow-y-auto" data-testid="alert-drawer">
