@@ -237,6 +237,7 @@ async def ingest_akamai_logs(
             if not isinstance(e, dict):
                 raise ValueError(f"event #{i} must be a JSON object")
     except ValueError as e:
+        logger.warning("Akamai ingest parse error for %s: %s", source_name, e)
         raise HTTPException(status_code=400, detail=str(e))
 
     result = await ingest_events_pipeline(events, source["name"], f"akamai:{source['name']}", background_tasks)
