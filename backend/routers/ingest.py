@@ -72,7 +72,10 @@ async def ingest_events_pipeline(
         }
         for n in normalized
     ]
-    await db.raw_logs.insert_many(raw_docs)
+    try:
+        await db.raw_logs.insert_many(raw_docs)
+    except Exception as exc:
+        logger.debug("raw_logs archive bypassed: %s", exc)
     await db.normalized_events.insert_many([dict(n) for n in normalized])
 
     latest = max(n["timestamp"] for n in normalized)
