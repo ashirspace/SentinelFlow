@@ -41,6 +41,21 @@ async def _dispatch_notifications_async(alerts: List[dict]):
         logger.warning("Webhook dispatcher failed: %s", e)
 
 
+async def _prune_storage_async():
+    """Maintain MongoDB Atlas free tier storage by capping normalized_events to 35,000 documents."""
+    try:
+        total = await db.normalized_events.count_documents({})
+        if total > 35000:
+            cursor = db.normalized_events.find({}, {"timestamp": 1}).sort("timestamp", -1).skip(30000).limit(1)
+            pivot = await cursor.to_list(1)
+            if pivot:
+                cutoff = pivot[0]["timestamp"]
+                del_res = await db.normalized_events.delete_many({"timestamp": {"$lt": cutoff}})
+                logger.info("Storage auto-prune: deleted %d older normalized events", del_res.deleted_count)
+    except Exception as exc:
+        logger.warning("Storage auto-prune failed: %s", exc)
+
+
 async def ingest_events_pipeline(
     records: list,
     source_name: str,
@@ -55,55 +70,59 @@ async def ingest_events_pipeline(
     if source and source.get("paused"):
         raise HTTPException(status_code=409, detail=f"Source '{source_name}' is paused")
 
-    retention_hours = int((source or {}).get("retention_hours") or 72)
-    retention_hours = max(1, min(72, retention_hours))
-
     normalized = [normalize_record(r, source_name) for r in records]
-    now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(hours=retention_hours)
 
-    raw_docs = [
-        {
-            "id": str(uuid.uuid4()),
-            "source_name": source_name,
-            "payload": n["raw_log"],
-            "created_at": n["timestamp"],
-            "expires_at": expires_at,
-        }
-        for n in normalized
-    ]
+    # Save normalized events (which already contain raw payload in 'raw_log')
     try:
-        await db.raw_logs.insert_many(raw_docs)
+        await db.normalized_events.insert_many([dict(n) for n in normalized])
     except Exception as exc:
-        logger.debug("raw_logs archive bypassed: %s", exc)
-    await db.normalized_events.insert_many([dict(n) for n in normalized])
+        logger.error("Insert normalized events failed: %s", exc)
 
     latest = max(n["timestamp"] for n in normalized)
-    await db.log_sources.update_one(
-        {"name": source_name},
-        {"$set": {"last_event_at": latest}},
-        upsert=True,
-    )
+    try:
+        await db.log_sources.update_one(
+            {"name": source_name},
+            {"$set": {"last_event_at": latest}},
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.warning("Update log_sources failed: %s", exc)
 
     # Load current blocklist for R010 detection
-    bl_docs = await db.ip_blocklist.find({}).to_list(5000)
-    blocklist = {d["ip"]: d for d in bl_docs}
+    try:
+        bl_docs = await db.ip_blocklist.find({}).to_list(5000)
+        blocklist = {d["ip"]: d for d in bl_docs}
+    except Exception:
+        blocklist = {}
 
     alerts = run_all_rules(normalized, blocklist=blocklist)
-    async_alerts = await detect_new_device_admin(db, normalized)
-    alerts.extend(async_alerts)
+    try:
+        async_alerts = await detect_new_device_admin(db, normalized)
+        alerts.extend(async_alerts)
+    except Exception as exc:
+        logger.warning("detect_new_device_admin failed: %s", exc)
 
     if alerts:
-        await db.alerts.insert_many([dict(a) for a in alerts])
+        try:
+            await db.alerts.insert_many([dict(a) for a in alerts])
+        except Exception as exc:
+            logger.error("Alerts insert failed: %s", exc)
+
         if background_tasks:
             background_tasks.add_task(_dispatch_notifications_async, alerts)
         else:
             await _dispatch_notifications_async(alerts)
 
-    await audit(
-        actor_email, "ingest", target=source_name,
-        meta={"count": len(normalized), "alerts": len(alerts)},
-    )
+    # Prune older events asynchronously to maintain free tier quota
+    if background_tasks:
+        background_tasks.add_task(_prune_storage_async)
+
+    # Only audit manual user actions, avoiding spam from automated stream ingests
+    if actor_email and not actor_email.startswith("akamai:") and not actor_email.startswith("key_") and actor_email not in ("system", "anonymous"):
+        await audit(
+            actor_email, "ingest", target=source_name,
+            meta={"count": len(normalized), "alerts": len(alerts)},
+        )
     return {"ingested": len(normalized), "alerts": len(alerts)}
 
 

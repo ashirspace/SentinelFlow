@@ -25,15 +25,19 @@ async def require_admin(user: dict = Depends(current_user)) -> dict:
 
 
 async def audit(actor_email: str, action: str, target: str = "", meta: Optional[dict] = None):
-    """Write an immutable entry to the audit_logs collection."""
-    await db.audit_logs.insert_one({
-        "id": str(uuid.uuid4()),
-        "actor": actor_email,
-        "action": action,
-        "target": target,
-        "meta": meta or {},
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+    """Write an immutable entry to the audit_logs collection safely."""
+    try:
+        await db.audit_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "actor": actor_email,
+            "action": action,
+            "target": target,
+            "meta": meta or {},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        import logging
+        logging.getLogger("sentinelflow.audit").warning("Audit write failed: %s", exc)
 
 
 def public_ingest_base() -> str:

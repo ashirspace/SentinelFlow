@@ -41,13 +41,19 @@ async def login(body: LoginBody, request: Request, response: Response):
         update = {"identifier": identifier, "fails": fails, "last_at": now.isoformat()}
         if fails >= 5:
             update["locked_until"] = (now + timedelta(minutes=15)).isoformat()
-        await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
+        try:
+            await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
+        except Exception:
+            pass
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if user.get("disabled"):
         raise HTTPException(status_code=403, detail="Account disabled")
 
-    await db.login_attempts.delete_one({"identifier": identifier})
+    try:
+        await db.login_attempts.delete_one({"identifier": identifier})
+    except Exception:
+        pass
     uid = str(user["_id"])
     tv = int(user.get("token_version", 0))
     access = create_access_token(uid, email, user["role"], tv)
